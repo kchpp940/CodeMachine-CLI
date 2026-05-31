@@ -1,48 +1,53 @@
 /**
  * Workflow Runner Entry Point
  *
- * Pure execution phase — accepts a pre-resolved ExecutionContext from
- * the WorkflowExecutionGateway, which handles all preview, onboarding,
- * confirm, and setup phases.
- *
- * Do NOT call this directly; go through the gateway.
+ * Architecture:
+ * - State machine for state management
+ * - Input providers for input sources
+ * - Clean separation of concerns
  */
 
-import type { WorkflowStep, WorkflowTemplate } from './templates/types.js';
-import { debug } from '../shared/logging/logger.js';
+import * as path from 'node:path';
+
+import type { RunWorkflowOptions, WorkflowStep, WorkflowTemplate } from './templates/types.js';
+import { loadTemplateWithPath } from './templates/index.js';
+import { debug, setDebugLogFile } from '../shared/logging/logger.js';
 import {
+  getTemplatePathFromTracking,
+  getSelectedTrack,
+  getSelectedConditions,
   getControllerView,
   loadControllerConfig,
   saveControllerConfig,
+  setActiveTemplate,
 } from '../shared/workflows/index.js';
 import { StepIndexManager } from './indexing/index.js';
 import { registry } from '../infra/engines/index.js';
 import { MonitoringCleanup, AgentMonitorService, StatusService } from '../agents/monitoring/index.js';
-import { WorkflowEventEmitter } from './events/index.js';
+import { WorkflowEventBus, WorkflowEventEmitter } from './events/index.js';
 import { ensureWorkspaceStructure, mirrorSubAgents } from '../runtime/services/workspace/index.js';
 import { WorkflowRunner } from './runner/index.js';
 import { getUniqueAgentId } from './context/index.js';
 import { runControllerView } from './controller/view.js';
 import { getAllInstalledImports } from '../shared/imports/index.js';
 import { registerImportedAgents, clearImportedAgents } from './utils/config.js';
-import type { ExecutionContext } from './gateway/types.js';
 
+// Re-export from preflight for backward compatibility
 export { ValidationError, checkWorkflowCanStart, checkSpecificationRequired, checkOnboardingRequired, needsOnboarding } from './preflight.js';
-export type { WorkflowStep, WorkflowTemplate, ExecutionContext };
+export type { WorkflowStep, WorkflowTemplate };
 
-export async function runWorkflow(context: ExecutionContext): Promise<void> {
-  const {
-    cwd,
-    cmRoot,
-    template,
-    templatePath,
-    selectedTrack,
-    selectedConditions,
-    eventBus,
-  } = context;
+/**
+ * Run a workflow
+ * Note: Pre-flight checks (specification validation) should be done via preflight.ts before calling this
+ */
+export async function runWorkflow(options: RunWorkflowOptions = {}): Promise<void> {
+  const cwd = options.cwd ? path.resolve(options.cwd) : process.cwd();
 
+  // Ensure workspace structure exists (creates .codemachine folder tree)
   await ensureWorkspaceStructure({ cwd });
 
+  // Auto-register agents from all installed imports
+  // This ensures imported agents/modules are available before template loading
   clearImportedAgents();
   const importedPackages = getAllInstalledImports();
   for (const imp of importedPackages) {
@@ -50,24 +55,52 @@ export async function runWorkflow(context: ExecutionContext): Promise<void> {
   }
   debug('[Workflow] Registered agents from %d imported packages', importedPackages.length);
 
+  // Load template
+  const cmRoot = path.join(cwd, '.codemachine');
+  const templatePath = options.templatePath || (await getTemplatePathFromTracking(cmRoot));
+  const { template } = await loadTemplateWithPath(cwd, templatePath);
+
+  // Ensure template.json exists with correct activeTemplate before any setter functions are called
+  // This prevents setControllerView/setSelectedTrack/etc from creating file with empty activeTemplate
+  const templateFileName = path.basename(templatePath);
+  await setActiveTemplate(cmRoot, templateFileName, template.autonomousMode);
+
+  // Clear screen for TUI
   if (process.stdout.isTTY) {
     process.stdout.write('\x1b[2J\x1b[H');
   }
 
+  // Redirect debug logs to file
+  const rawLogLevel = (process.env.LOG_LEVEL || '').trim().toLowerCase();
+  const debugFlag = (process.env.DEBUG || '').trim().toLowerCase();
+  const debugEnabled = rawLogLevel === 'debug' || (debugFlag !== '' && debugFlag !== '0' && debugFlag !== 'false');
+  const debugLogPath = debugEnabled ? path.join(cwd, '.codemachine', 'logs', 'workflow-debug.log') : null;
+  setDebugLogFile(debugLogPath);
+
+  // Set up cleanup handlers
   MonitoringCleanup.setup();
 
+  // Initialize index manager for step tracking
   const indexManager = new StepIndexManager(cmRoot);
 
+  // Register callback to save session state before cleanup on Ctrl+C
+  // This ensures session/monitoring IDs are persisted even if the first turn hasn't completed
   MonitoringCleanup.registerWorkflowHandlers({
     onBeforeCleanup: async () => {
+      // Check if we're in controller view - controller session goes to controllerConfig, not completedSteps
       const isInControllerView = await getControllerView(cmRoot);
+
       const monitor = AgentMonitorService.getInstance();
       const activeAgents = monitor.getActiveAgents();
+
+      // Find root agents (no parentId) - these are the main step/controller agents
       const rootAgents = activeAgents.filter((agent) => !agent.parentId);
 
       for (const agent of rootAgents) {
+        // Only save if agent has a sessionId (needed for resume)
         if (agent.sessionId) {
           if (isInControllerView) {
+            // Save to controllerConfig (controller's own section)
             const existingConfig = await loadControllerConfig(cmRoot);
             if (existingConfig?.controllerConfig?.agentId) {
               debug('[Workflow] Saving controller session on Ctrl+C: agentId=%s, sessionId=%s, monitoringId=%d',
@@ -79,6 +112,7 @@ export async function runWorkflow(context: ExecutionContext): Promise<void> {
               }, existingConfig.autonomousMode);
             }
           } else {
+            // Save to completedSteps (normal step agent)
             const stepIndex = indexManager.currentStepIndex;
             debug('[Workflow] Saving session state on Ctrl+C: step=%d, sessionId=%s, monitoringId=%d',
               stepIndex, agent.sessionId, agent.id);
@@ -89,13 +123,15 @@ export async function runWorkflow(context: ExecutionContext): Promise<void> {
     },
   });
 
-  debug('[Workflow] Using template: %s (path=%s)', template.name, templatePath);
+  debug('[Workflow] Using template: %s', template.name);
 
+  // Mirror sub-agents if template has subAgentIds
   if (template.subAgentIds && template.subAgentIds.length > 0) {
     debug('[Workflow] Mirroring %d sub-agents', template.subAgentIds.length);
     await mirrorSubAgents({ cwd, subAgentIds: template.subAgentIds });
   }
 
+  // Sync agent configurations
   const workflowAgents = Array.from(
     template.steps
       .filter((step) => step.type === 'module')
@@ -122,24 +158,42 @@ export async function runWorkflow(context: ExecutionContext): Promise<void> {
     }
   }
 
+  // Get event bus
+  // @ts-expect-error - global export from app.tsx
+  const eventBus: WorkflowEventBus = globalThis.__workflowEventBus ?? new WorkflowEventBus();
   const emitter = new WorkflowEventEmitter(eventBus);
 
+  // @ts-expect-error - global export
+  if (!globalThis.__workflowEventBus) {
+    // @ts-expect-error - global export
+    globalThis.__workflowEventBus = eventBus;
+  }
+
+  // Initialize status coordinator
   const status = StatusService.getInstance();
   status.setEmitter(emitter);
 
+  // Get resume info
   const resumeInfo = await indexManager.getResumeInfo();
   const startIndex = resumeInfo.startIndex;
   debug('[Workflow] ========== STEP DECISION ==========');
   debug('[Workflow] Resume info: startIndex=%d, decision=%s', startIndex, resumeInfo.decision);
+
+  // Load track and conditions selections
+  const selectedTrack = await getSelectedTrack(cmRoot);
+  const selectedConditions = await getSelectedConditions(cmRoot);
   debug('[Workflow] selectedTrack: %s', selectedTrack);
   debug('[Workflow] selectedConditions: %O', selectedConditions);
 
+  // Filter steps by track and conditions
   debug('[Workflow] Filtering %d template steps...', template.steps.length);
   const visibleSteps = template.steps.filter((step, idx) => {
+    // Separators are always included (visual dividers only)
     if (step.type === 'separator') {
       debug('[Workflow] Step %d: type=separator → included (visual separator)', idx);
       return true;
     }
+    // Module steps may be filtered by track/conditions
     if (step.tracks?.length && selectedTrack && !step.tracks.includes(selectedTrack)) {
       debug('[Workflow] Step %d: agentId=%s, tracks=%O, selectedTrack=%s → EXCLUDED (track mismatch)',
         idx, step.agentId, step.tracks, selectedTrack);
@@ -167,10 +221,14 @@ export async function runWorkflow(context: ExecutionContext): Promise<void> {
   });
   debug('[Workflow] Visible steps after filtering: %d', visibleSteps.length);
 
+  // Count module steps for total
   const moduleSteps = visibleSteps.filter(s => s.type === 'module');
 
+  // Initialize index manager with start index
   indexManager.setCurrentStepIndex(startIndex);
 
+  // Run controller view FIRST if needed (blocks until controller done + user confirms)
+  // Timeline population happens AFTER controller view since it's only visible in executing view
   let controllerResult;
   try {
     controllerResult = await runControllerView({
@@ -189,24 +247,32 @@ export async function runWorkflow(context: ExecutionContext): Promise<void> {
     throw error;
   }
 
+  // If controller ran, adjust start index to skip the controller agent step
   let actualStartIndex = startIndex;
   if (controllerResult.ran && startIndex === 0 && moduleSteps.length > 0) {
     const firstStep = moduleSteps[0];
+    // Only skip if the first step is the controller agent
     if (firstStep.agentId === controllerResult.agentId) {
       debug('[Workflow] Controller view ran, skipping step 0 (controller agent: %s)', controllerResult.agentId);
       actualStartIndex = 1;
+      // Mark step 0 as completed in the index manager
       indexManager.setCurrentStepIndex(1);
       await indexManager.stepCompleted(0);
     }
   }
 
+  // NOW emit workflow started and populate timeline (after controller view is done)
+  // This ensures timeline only appears when switching to executing view
   emitter.workflowStarted(template.name, moduleSteps.length);
 
+  // Emit controller info AFTER workflow:started to prevent reset() from clearing it
+  // This enables the 'c' key to return to controller even while step agent executes
   if (controllerResult.controllerInfo) {
     const info = controllerResult.controllerInfo;
     emitter.setControllerInfo(info.id, info.name, info.engine, info.model);
   }
 
+  // Pre-populate timeline
   debug('[Workflow] ========== TIMELINE POPULATION ==========');
   debug('[Workflow] startIndex=%d, actualStartIndex=%d, total moduleSteps=%d', startIndex, actualStartIndex, moduleSteps.length);
   let moduleIndex = 0;
@@ -216,8 +282,10 @@ export async function runWorkflow(context: ExecutionContext): Promise<void> {
       const defaultEngine = registry.getDefault();
       const engineType = step.engine ?? defaultEngine?.metadata.id ?? 'unknown';
       const uniqueAgentId = getUniqueAgentId(step, moduleIndex);
+      // Use actualStartIndex to account for controller agent being skipped
       const isCompleted = moduleIndex < actualStartIndex;
 
+      // Resolve model from step or engine default
       const engineModule = registry.get(engineType);
       const resolvedModel = step.model ?? engineModule?.metadata.defaultModel;
 
@@ -230,12 +298,14 @@ export async function runWorkflow(context: ExecutionContext): Promise<void> {
         engineType,
         moduleIndex,
         moduleSteps.length,
-        stepIndex,
+        stepIndex, // orderIndex: overall step position for timeline ordering
         isCompleted ? 'completed' : 'pending',
         resolvedModel
       );
 
+      // For completed agents, register their monitoringId from template.json
       if (isCompleted) {
+        // For controller agent (step 0), use the monitoringId from controller result
         if (moduleIndex === 0 && controllerResult.ran && controllerResult.monitoringId !== undefined) {
           emitter.registerMonitoringId(uniqueAgentId, controllerResult.monitoringId);
           debug('[Workflow] Registered controller monitoringId=%d for step 0 (%s)', controllerResult.monitoringId, uniqueAgentId);
@@ -257,6 +327,7 @@ export async function runWorkflow(context: ExecutionContext): Promise<void> {
     actualStartIndex, moduleSteps.length - actualStartIndex);
   debug('[Workflow] ========== END STEP DECISION ==========');
 
+  // Create and run workflow
   const runner = new WorkflowRunner({
     cwd,
     cmRoot,
@@ -277,11 +348,14 @@ export async function runWorkflow(context: ExecutionContext): Promise<void> {
     });
     throw error;
   } finally {
+    // Always cleanup when workflow ends (success, error, or stop)
     runner.signalManager.cleanup();
   }
 
+  // Keep process alive for TUI
   if (eventBus.hasSubscribers()) {
     await new Promise(() => {
+      // Never resolves - Ctrl+C exits
     });
   }
 }

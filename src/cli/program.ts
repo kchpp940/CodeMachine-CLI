@@ -4,7 +4,6 @@ import {
   registerAuthCommands,
   registerRunCommand,
   registerStepCommand,
-  registerWorkflowCommand,
   registerAgentsCommand,
   registerImportCommand,
   registerExportCommand,
@@ -28,5 +27,4 @@ export async function registerCli(program: Command): Promise<void> {
   registerExportCommand(program);
   await registerRunCommand(program);
   await registerStepCommand(program);
-  await registerWorkflowCommand(program);
 }

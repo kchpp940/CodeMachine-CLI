@@ -3,6 +3,7 @@
  */
 
 import type { EngineRunOptions, EngineRunResult } from './types.js';
+import type { ProviderCapabilities } from '../providers/_shared/types.js';
 
 /**
  * Engine metadata - describes the engine for auto-discovery
@@ -30,6 +31,8 @@ export interface EngineMetadata {
   experimental?: boolean;
   /** Optional icon for UI */
   icon?: string;
+  /** Capabilities declaration - what this engine supports */
+  capabilities: ProviderCapabilities;
 }
 
 /**

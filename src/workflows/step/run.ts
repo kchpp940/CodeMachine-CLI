@@ -12,6 +12,7 @@ import { getUniqueAgentId } from '../context/index.js';
 import { executeStep } from './execute.js';
 import { selectEngine } from './engine.js';
 import { registry } from '../../infra/engines/index.js';
+import { validateModelOverride } from '../../infra/engines/providers/_shared/index.js';
 import { getSelectedConditions, getSelectedTrack } from '../../shared/workflows/template.js';
 import { loadAgentConfig } from '../../agents/runner/index.js';
 import { loadChainedPrompts } from '../../agents/runner/chained.js';
@@ -110,6 +111,9 @@ export async function runStepFresh(ctx: RunnerContext): Promise<RunStepResult | 
 
   // Resolve model
   const engineModule = registry.get(engineType);
+  if (engineModule) {
+    validateModelOverride(step.model, engineModule.metadata.capabilities, engineModule.metadata.name);
+  }
   const resolvedModel = step.model ?? engineModule?.metadata.defaultModel;
   if (resolvedModel) {
     ctx.emitter.updateAgentModel(uniqueAgentId, resolvedModel);
@@ -307,6 +311,9 @@ export async function runStepResume(
 
   // Resolve model
   const engineModule = registry.get(engineType);
+  if (engineModule) {
+    validateModelOverride(step.model, engineModule.metadata.capabilities, engineModule.metadata.name);
+  }
   const resolvedModel = step.model ?? engineModule?.metadata.defaultModel;
   if (resolvedModel) {
     ctx.emitter.updateAgentModel(uniqueAgentId, resolvedModel);

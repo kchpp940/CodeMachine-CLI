@@ -1,5 +1,6 @@
 import type { EngineType } from '../../infra/engines/index.js';
-import { getEngine } from '../../infra/engines/index.js';
+import { getEngine, registry } from '../../infra/engines/index.js';
+import { validateModelOverride } from '../../infra/engines/providers/_shared/index.js';
 import { loadAgentConfig } from './config.js';
 import { loadChainedPrompts, type ChainedPrompt } from './chained.js';
 import { AgentMonitorService, AgentLoggerService, StatusService } from '../monitoring/index.js';
@@ -334,6 +335,9 @@ export async function executeAgent(
   // When falling back to a different engine, ignore agent's model config (it's for the original engine)
   const model = modelOverride ?? (didFallback ? undefined : (agentConfig.model as string | undefined)) ?? engineModule.metadata.defaultModel;
   const modelReasoningEffort = (agentConfig.modelReasoningEffort as 'low' | 'medium' | 'high' | undefined) ?? engineModule.metadata.defaultModelReasoningEffort;
+
+  // Validate model override capability before execution
+  validateModelOverride(modelOverride, engineModule.metadata.capabilities, engineModule.metadata.name);
 
   // Initialize monitoring with engine/model info (unless explicitly disabled)
   const monitor = !disableMonitoring ? AgentMonitorService.getInstance() : null;

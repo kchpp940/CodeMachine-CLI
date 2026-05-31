@@ -1,20 +1,21 @@
-export interface CodexCommandOptions {
-  workingDir: string;
-  resumeSessionId?: string;
-  resumePrompt?: string;
-  model?: string;
-  modelReasoningEffort?: 'low' | 'medium' | 'high';
-}
+import {
+  type SharedCommandOptions,
+  type ProviderCommand,
+  addResumeArg,
+  addReasoningEffortArg,
+  normalizeModel,
+  normalizeResumeSessionId,
+  getProviderCapabilities,
+} from '../../_shared/index.js';
 
-export interface CodexCommand {
-  command: string;
-  args: string[];
-}
+export type CodexCommandOptions = SharedCommandOptions;
+export type CodexCommand = ProviderCommand;
+
+const caps = getProviderCapabilities('codex');
 
 export function buildCodexCommand(options: CodexCommandOptions): CodexCommand {
   const { workingDir, resumeSessionId, resumePrompt, model, modelReasoningEffort } = options;
 
-  // Base args shared by both normal exec and resume
   const args = [
     'exec',
     '--json',
@@ -26,21 +27,17 @@ export function buildCodexCommand(options: CodexCommandOptions): CodexCommand {
     workingDir,
   ];
 
-  // Add model if specified (only for new exec, not resume)
-  if (model && !resumeSessionId) {
-    args.push('--model', model);
+  const normalizedModel = normalizeModel(model);
+  if (normalizedModel && !resumeSessionId) {
+    args.push(caps.modelFlag, normalizedModel);
   }
 
-  // Add reasoning effort if specified
-  if (modelReasoningEffort) {
-    args.push('--config', `model_reasoning_effort="${modelReasoningEffort}"`);
-  }
+  addReasoningEffortArg(args, modelReasoningEffort);
 
-  if (resumeSessionId) {
-    // Resume: add resume subcommand with session ID and combined prompt
-    args.push('resume', resumeSessionId, resumePrompt!);
+  const normalizedResumeId = normalizeResumeSessionId(resumeSessionId);
+  if (normalizedResumeId) {
+    args.push(caps.resumeFlag, normalizedResumeId, resumePrompt!);
   } else {
-    // Normal exec: read prompt from stdin
     args.push('-');
   }
 
