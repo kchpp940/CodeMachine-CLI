@@ -1,28 +1,37 @@
-/**
- * Crash Recovery Detection
- *
- * Determines if a step should resume from a previous crash.
- * Uses existing lifecycle helpers for consistency.
- */
-
 import { isStepResumable } from '../indexing/lifecycle.js';
+import { AgentMonitorService } from '../../agents/monitoring/index.js';
 import type { StepData } from '../indexing/types.js';
 import type { CrashDetectionResult } from './types.js';
+import { debug } from '../../shared/logging/logger.js';
 
-/**
- * Detect if a step needs crash recovery
- *
- * A step needs recovery if:
- * 1. It has a sessionId (agent conversation was started)
- * 2. It does NOT have completedAt (step didn't finish)
- *
- * @param stepData - Step data from persistence (may be null)
- * @returns Detection result with recovery info
- */
-export function detectCrashRecovery(stepData: StepData | null): CrashDetectionResult {
-  // Reuse existing helper from lifecycle.ts
+export async function detectCrashRecovery(stepData: StepData | null): Promise<CrashDetectionResult> {
   if (!stepData || !isStepResumable(stepData)) {
     return { isRecovering: false };
+  }
+
+  if (stepData.monitoringId !== undefined) {
+    const monitor = AgentMonitorService.getInstance();
+
+    if (stepData.monitoringId !== undefined) {
+      const reconciled = await monitor.reconcileStaleRunning([stepData.monitoringId]);
+      if (reconciled > 0) {
+        debug('[recovery/detect] Reconciled stale agent %d for current step', stepData.monitoringId);
+      }
+    }
+
+    const agent = monitor.getAgent(stepData.monitoringId);
+
+    if (agent) {
+      if (agent.status === 'failed') {
+        debug('[recovery/detect] Agent %d is failed in DB -> not recoverable', stepData.monitoringId);
+        return { isRecovering: false, reason: 'db_failed' };
+      }
+
+      if (agent.status === 'completed') {
+        debug('[recovery/detect] Agent %d is completed in DB -> not recovering', stepData.monitoringId);
+        return { isRecovering: false };
+      }
+    }
   }
 
   return {
@@ -30,13 +39,10 @@ export function detectCrashRecovery(stepData: StepData | null): CrashDetectionRe
     sessionId: stepData.sessionId,
     monitoringId: stepData.monitoringId,
     completedChains: stepData.completedChains,
+    reason: 'resumable',
   };
 }
 
-/**
- * Check if step data indicates a crash recovery scenario
- * (Simplified version for guards/conditions)
- */
 export function isCrashRecovery(stepData: StepData | null): boolean {
   return isStepResumable(stepData);
 }

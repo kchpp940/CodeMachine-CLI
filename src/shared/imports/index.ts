@@ -61,10 +61,7 @@ export {
   resolvePathWithImports,
   getAllWorkflowDirectories,
   getAllPromptDirectories,
-  getResolvedPath,
-  formatCheckedPaths,
 } from './resolve.js';
-export type { ResolveResult } from './resolve.js';
 
 // Default packages
 export { DEFAULT_PACKAGES } from './defaults.js';

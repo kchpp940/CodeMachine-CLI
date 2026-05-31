@@ -1,8 +1,8 @@
-import { readdirSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, statSync } from 'node:fs';
 import * as path from 'node:path';
 import type { StepOverrides, WorkflowStep } from '../types.js';
 import { mainAgents } from '../config.js';
-import { resolvePromptPath, resolvePromptFolder, formatCheckedPaths } from '../../../shared/imports/index.js';
+import { resolvePromptFolder } from '../../../shared/imports/index.js';
 import { getDevRoot } from '../../../shared/runtime/dev.js';
 
 function extractOrderPrefix(filename: string): number | null {
@@ -18,14 +18,11 @@ export function resolveFolder(folderName: string, overrides: StepOverrides = {})
     throw new Error(`Folder configuration not found in main.agents.js: ${folderName}`);
   }
 
-  // Check local first, then imported packages
-  const localRoot = getDevRoot() || '';
-  const resolveResult = resolvePromptFolder(folderName, localRoot);
-  const promptsDir = resolveResult.path;
+  // Check imported packages first, then local
+  const promptsDir = resolvePromptFolder(folderName, getDevRoot() || '');
 
-  if (!promptsDir || !statSync(promptsDir).isDirectory()) {
-    const checkedPaths = formatCheckedPaths(resolveResult.checkedPaths);
-    throw new Error(`Folder not found: prompts/templates/${folderName}${checkedPaths}`);
+  if (!promptsDir || !existsSync(promptsDir) || !statSync(promptsDir).isDirectory()) {
+    throw new Error(`Folder not found: prompts/templates/${folderName} (checked imports and local)`);
   }
 
   const files = readdirSync(promptsDir);
@@ -52,37 +49,18 @@ export function resolveFolder(folderName: string, overrides: StepOverrides = {})
     // Remove number prefix and extension to get the agent ID
     const agentId = basename.replace(/^\d+\s*-\s*/, '').replace(ext, '').trim();
     // Use absolute path since promptsDir is already resolved
-    const defaultPromptPath = path.join(promptsDir, basename);
+    const promptPath = path.join(promptsDir, basename);
     const model = overrides.model ?? folderConfig.model;
 
     if (!model) {
       throw new Error(`Folder config ${folderName} is missing a model configuration`);
     }
 
-    let finalPromptPath: string | string[] = defaultPromptPath;
-    if (overrides.promptPath) {
-      const rawOverridePaths = Array.isArray(overrides.promptPath) ? overrides.promptPath : [overrides.promptPath];
-      const resolvedOverridePaths: string[] = [];
-      for (const p of rawOverridePaths) {
-        const resolveResult = resolvePromptPath(p, localRoot);
-        if (!resolveResult.path) {
-          const checkedPaths = formatCheckedPaths(resolveResult.checkedPaths);
-          throw new Error(
-            `Folder "${folderName}" has invalid promptPath override: "${p}"${checkedPaths}\n` +
-            `Please ensure the prompt file exists in your local prompts/templates/ directory, ` +
-            `or in an imported package.`
-          );
-        }
-        resolvedOverridePaths.push(resolveResult.path);
-      }
-      finalPromptPath = Array.isArray(overrides.promptPath) ? resolvedOverridePaths : resolvedOverridePaths[0];
-    }
-
     return {
       type: 'module',
       agentId,
       agentName: overrides.agentName ?? agentId.replace(/-/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase()),
-      promptPath: finalPromptPath,
+      promptPath: overrides.promptPath ?? promptPath,
       model,
       modelReasoningEffort: overrides.modelReasoningEffort ?? folderConfig.modelReasoningEffort,
     };

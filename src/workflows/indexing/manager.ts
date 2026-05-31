@@ -417,6 +417,47 @@ export class StepIndexManager {
   }
 
   /**
+   * Sync full resumable state for a step in a single write.
+   *
+   * Call this on interruption cleanup for paused (resumable) agents to ensure
+   * sessionId, monitoringId, and completedChains are all atomically persisted
+   * before DB/UI status is updated. This prevents recovery from re-executing
+   * already-completed chained prompts.
+   */
+  async syncStepResumableState(
+    stepIndex: number,
+    state: {
+      sessionId: string;
+      monitoringId: number;
+      completedChains?: number[];
+    }
+  ): Promise<void> {
+    logDebug('sync', `Syncing step ${stepIndex} resumable state`, state);
+
+    const { data, trackingPath } = await readTrackingData(this.cmRoot);
+    const completedSteps = data.completedSteps ?? {};
+    const key = String(stepIndex);
+
+    const existing = completedSteps[key];
+    if (existing) {
+      existing.sessionId = state.sessionId;
+      existing.monitoringId = state.monitoringId;
+      if (state.completedChains !== undefined) {
+        existing.completedChains = state.completedChains;
+      }
+    } else {
+      completedSteps[key] = {
+        sessionId: state.sessionId,
+        monitoringId: state.monitoringId,
+        completedChains: state.completedChains,
+      };
+    }
+
+    data.completedSteps = completedSteps;
+    await writeTrackingData(trackingPath, data);
+  }
+
+  /**
    * Removes a step from the notCompletedSteps array
    * Use this when a step is handled (e.g., manually skipped) without completing.
    */

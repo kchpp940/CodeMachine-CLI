@@ -6,27 +6,14 @@
  */
 
 import * as path from 'node:path';
-import { existsSync } from 'node:fs';
-import type { WorkflowTemplate, WorkflowStep } from './templates/types.js';
-import { isModuleStep } from './templates/types.js';
+import type { WorkflowTemplate } from './templates/types.js';
 import { loadTemplateWithPath } from './templates/loader.js';
-import {
-  getTemplatePathFromTracking,
-  getSelectedTrack,
-  hasSelectedConditions,
-  getProjectName,
-  validateWorkflowTemplateExists,
-} from '../shared/workflows/index.js';
+import { getTemplatePathFromTracking, getSelectedTrack, hasSelectedConditions, getProjectName } from '../shared/workflows/index.js';
 import { validateSpecification } from '../runtime/services/index.js';
 import { ensureWorkspaceStructure } from '../runtime/services/workspace/index.js';
 import type { AgentDefinition } from '../shared/agents/config/types.js';
 import { registerImportedAgents, clearImportedAgents } from './utils/config.js';
-import {
-  getAllInstalledImports,
-  resolvePromptPath,
-  formatCheckedPaths,
-} from '../shared/imports/index.js';
-import { getDevRoot } from '../shared/runtime/dev.js';
+import { getAllInstalledImports } from '../shared/imports/index.js';
 
 export { ValidationError } from '../runtime/services/index.js';
 
@@ -40,73 +27,6 @@ function ensureImportedAgentsRegistered(): void {
   const importedPackages = getAllInstalledImports();
   for (const imp of importedPackages) {
     registerImportedAgents(imp.resolvedPaths.config);
-  }
-}
-
-/**
- * Validate all prompt paths in a workflow step
- * @param step - Workflow step to validate
- * @param localRoot - Local root directory for path resolution
- * @returns Array of validation errors (empty if all paths are valid)
- */
-function validateStepPromptPaths(step: WorkflowStep, localRoot: string): string[] {
-  const errors: string[] = [];
-
-  if (!isModuleStep(step)) {
-    return errors;
-  }
-
-  const promptPaths = Array.isArray(step.promptPath) ? step.promptPath : [step.promptPath];
-
-  for (const promptPath of promptPaths) {
-    if (path.isAbsolute(promptPath)) {
-      if (!existsSync(promptPath)) {
-        errors.push(
-          `Resolved prompt file does not exist: "${promptPath}"\n` +
-          `    This path was already resolved to an absolute path by the step resolver. ` +
-          `The file may have been moved or deleted after the workflow started.`
-        );
-      }
-      continue;
-    }
-
-    const resolveResult = resolvePromptPath(promptPath, localRoot);
-    if (!resolveResult.path) {
-      const checkedPaths = formatCheckedPaths(resolveResult.checkedPaths);
-      errors.push(
-        `Relative promptPath "${promptPath}" could not be resolved.${checkedPaths}`
-      );
-    }
-  }
-
-  return errors;
-}
-
-/**
- * Validate all prompt paths in a workflow template before execution
- * Throws an error with detailed information if any prompt paths are missing
- * @param template - Loaded workflow template
- * @param localRoot - Local root directory for path resolution
- * @throws Error with detailed information if any prompt paths are missing
- */
-export function validateAllPromptPaths(template: WorkflowTemplate, localRoot: string): void {
-  const allErrors: string[] = [];
-
-  for (let i = 0; i < template.steps.length; i++) {
-    const step = template.steps[i];
-    const stepErrors = validateStepPromptPaths(step, localRoot);
-    if (stepErrors.length > 0) {
-      allErrors.push(...stepErrors.map(err => `  Step ${i + 1} (${step.type}): ${err}`));
-    }
-  }
-
-  if (allErrors.length > 0) {
-    throw new Error(
-      `Workflow template "${template.name}" has ${allErrors.length} missing prompt file(s):\n` +
-      allErrors.join('\n') +
-      '\n\nPlease ensure all prompt files exist in your local prompts/templates/ directory, ' +
-      'or in an imported package.'
-    );
   }
 }
 
@@ -141,20 +61,12 @@ export async function checkOnboardingRequired(options: { cwd?: string } = {}): P
 
   // Load template
   const templatePath = await getTemplatePathFromTracking(cmRoot);
-  const localRoot = getDevRoot() || '';
-
-  // Validate template exists before loading
-  validateWorkflowTemplateExists(templatePath, localRoot);
-
   const { template } = await loadTemplateWithPath(cwd, templatePath);
-
-  // Validate all prompt paths exist before workflow starts
-  validateAllPromptPaths(template, localRoot);
 
   // Check existing selections
   const selectedTrack = await getSelectedTrack(cmRoot);
   const conditionsSelected = await hasSelectedConditions(cmRoot);
-  const _existingProjectName = await getProjectName(cmRoot);
+  const existingProjectName = await getProjectName(cmRoot);
 
   // Determine what's needed
   const hasTracks = !!(template.tracks && Object.keys(template.tracks.options).length > 0);
@@ -162,7 +74,7 @@ export async function checkOnboardingRequired(options: { cwd?: string } = {}): P
   const needsTrackSelection = hasTracks && !selectedTrack;
   const needsConditionsSelection = hasConditionGroups && !conditionsSelected;
   // TODO: Re-enable project name check - temporarily disabled due to persistence bug
-  const needsProjectName = false; // !_existingProjectName;
+  const needsProjectName = false; // !existingProjectName;
 
   // Controller is now pre-specified via controller() function - no selection needed
   const needsControllerSelection = false;

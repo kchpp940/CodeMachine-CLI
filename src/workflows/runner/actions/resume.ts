@@ -100,10 +100,10 @@ export async function resumeWithInput(
     if (session.isQueuedPrompt(input)) {
       isQueuedPrompt = true;
       const chainIndex = session.promptQueueIndex;
-      debug('[actions/resume] Input matches queued prompt at index %d, advancing...', chainIndex);
+      debug('[actions/resume] Input matches queued prompt at index %d, persisting then advancing...', chainIndex);
+      await ctx.indexManager.chainCompleted(stepIndex, chainIndex);
       session.advanceQueue();
       debug('[actions/resume] After advance: queueIndex=%d', ctx.indexManager.promptQueueIndex);
-      await ctx.indexManager.chainCompleted(stepIndex, chainIndex);
     } else {
       debug('[actions/resume] Input does NOT match queued prompt (custom input)');
     }
@@ -111,9 +111,9 @@ export async function resumeWithInput(
     if (ctx.indexManager.isQueuedPrompt(input)) {
       isQueuedPrompt = true;
       const chainIndex = ctx.indexManager.promptQueueIndex;
+      await ctx.indexManager.chainCompleted(stepIndex, chainIndex);
       ctx.indexManager.advanceQueue();
       debug('[actions/resume] Advanced queue to index %d', ctx.indexManager.promptQueueIndex);
-      await ctx.indexManager.chainCompleted(stepIndex, chainIndex);
     }
   }
 
@@ -198,15 +198,13 @@ export async function sendQueuedPrompt(
     nextPrompt.content.slice(0, 50)
   );
 
-  // Advance queue
+  await ctx.indexManager.chainCompleted(stepIndex, chainIndex);
+
   if (session) {
     session.advanceQueue();
   } else {
     ctx.indexManager.advanceQueue();
   }
-
-  // Track chain completion
-  await ctx.indexManager.chainCompleted(stepIndex, chainIndex);
 
   // Emit queue state change to UI
   ctx.emitter.setInputState({

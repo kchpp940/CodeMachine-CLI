@@ -33,14 +33,7 @@ import { getAllInstalledImports } from '../shared/imports/index.js';
 import { registerImportedAgents, clearImportedAgents } from './utils/config.js';
 
 // Re-export from preflight for backward compatibility
-export {
-  ValidationError,
-  checkWorkflowCanStart,
-  checkSpecificationRequired,
-  checkOnboardingRequired,
-  needsOnboarding,
-  validateAllPromptPaths,
-} from './preflight.js';
+export { ValidationError, checkWorkflowCanStart, checkSpecificationRequired, checkOnboardingRequired, needsOnboarding } from './preflight.js';
 export type { WorkflowStep, WorkflowTemplate };
 
 /**
@@ -87,27 +80,24 @@ export async function runWorkflow(options: RunWorkflowOptions = {}): Promise<voi
   // Set up cleanup handlers
   MonitoringCleanup.setup();
 
-  // Initialize index manager for step tracking
+  const monitor = AgentMonitorService.getInstance();
+
   const indexManager = new StepIndexManager(cmRoot);
 
   // Register callback to save session state before cleanup on Ctrl+C
   // This ensures session/monitoring IDs are persisted even if the first turn hasn't completed
   MonitoringCleanup.registerWorkflowHandlers({
     onBeforeCleanup: async () => {
-      // Check if we're in controller view - controller session goes to controllerConfig, not completedSteps
       const isInControllerView = await getControllerView(cmRoot);
 
       const monitor = AgentMonitorService.getInstance();
       const activeAgents = monitor.getActiveAgents();
 
-      // Find root agents (no parentId) - these are the main step/controller agents
       const rootAgents = activeAgents.filter((agent) => !agent.parentId);
 
       for (const agent of rootAgents) {
-        // Only save if agent has a sessionId (needed for resume)
         if (agent.sessionId) {
           if (isInControllerView) {
-            // Save to controllerConfig (controller's own section)
             const existingConfig = await loadControllerConfig(cmRoot);
             if (existingConfig?.controllerConfig?.agentId) {
               debug('[Workflow] Saving controller session on Ctrl+C: agentId=%s, sessionId=%s, monitoringId=%d',
@@ -119,13 +109,33 @@ export async function runWorkflow(options: RunWorkflowOptions = {}): Promise<voi
               }, existingConfig.autonomousMode);
             }
           } else {
-            // Save to completedSteps (normal step agent)
             const stepIndex = indexManager.currentStepIndex;
             debug('[Workflow] Saving session state on Ctrl+C: step=%d, sessionId=%s, monitoringId=%d',
               stepIndex, agent.sessionId, agent.id);
             await indexManager.stepSessionInitialized(stepIndex, agent.sessionId, agent.id);
           }
         }
+      }
+    },
+    onBeforeAgentStatusUpdate: async (
+      agentId: number,
+      finalStatus: 'paused' | 'failed',
+      info: { sessionId?: string; monitoringId: number }
+    ) => {
+      const stepIndex = indexManager.currentStepIndex;
+      if (finalStatus === 'failed') {
+        debug('[Workflow] Agent %d failed during cleanup, removing from notCompletedSteps BEFORE DB/UI update (step=%d)', agentId, stepIndex);
+        await indexManager.removeFromNotCompleted(stepIndex);
+      } else if (finalStatus === 'paused' && info.sessionId) {
+        const currentChainIndex = indexManager.promptQueueIndex;
+        const completedChains = Array.from({ length: currentChainIndex }, (_, i) => i);
+        debug('[Workflow] Agent %d paused (resumable), syncing full state to index BEFORE DB/UI update (step=%d, sessionId=%s, completedChains=%o)',
+          agentId, stepIndex, info.sessionId, completedChains);
+        await indexManager.syncStepResumableState(stepIndex, {
+          sessionId: info.sessionId,
+          monitoringId: info.monitoringId,
+          completedChains,
+        });
       }
     },
   });

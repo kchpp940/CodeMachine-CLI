@@ -15,14 +15,11 @@ import type { StepSession } from '../session/index.js';
  * Result of crash recovery detection
  */
 export interface CrashDetectionResult {
-  /** Whether this step is resuming from a crash */
   isRecovering: boolean;
-  /** Session ID to resume (if recovering) */
   sessionId?: string;
-  /** Monitoring ID to resume (if recovering) */
   monitoringId?: number;
-  /** Completed chain indices (if any) */
   completedChains?: number[];
+  reason?: 'resumable' | 'db_failed';
 }
 
 /**

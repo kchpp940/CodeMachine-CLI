@@ -115,9 +115,18 @@ export async function handleCrashRecovery(
   } = options;
 
   // 1. Detect if crash recovery is needed
-  const detection = detectCrashRecovery(stepData);
+  const detection = await detectCrashRecovery(stepData);
 
   if (!detection.isRecovering) {
+    if (detection.reason === 'db_failed') {
+      debug('[recovery] Step %d is not recoverable (DB shows failed), cleaning up index', stepIndex);
+      await indexManager.removeFromNotCompleted(stepIndex);
+      const status = StatusService.getInstance();
+      status.failed(uniqueAgentId);
+      machine.send({ type: 'STEP_ERROR', error: new Error(`Step ${stepIndex} failed (not recoverable)`) });
+      return { handled: true, detection };
+    }
+
     debug('[recovery] No crash recovery needed for step %d', stepIndex);
     return { handled: false, detection };
   }
