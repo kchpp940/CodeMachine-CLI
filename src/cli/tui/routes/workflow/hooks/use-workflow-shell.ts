@@ -5,7 +5,7 @@
  * for the workflow shell components.
  */
 
-import { createEffect, createSignal } from "solid-js"
+import { createEffect } from "solid-js"
 import { useTerminalDimensions } from "@opentui/solid"
 import { useTheme } from "@tui/shared/context/theme"
 import { useToast } from "@tui/shared/context/toast"
@@ -42,26 +42,6 @@ export function useWorkflowShell(options: UseWorkflowShellOptions) {
 
   // State accessor
   const state = () => ui.state()
-
-  // Recovery plan modal state
-  const [showRecoveryModal, setShowRecoveryModal] = createSignal(false)
-
-  // Handle recovery plan confirmation
-  const handleRecoveryConfirm = () => {
-    debug('[SHELL] Recovery plan confirmed')
-    ui.actions.confirmRecovery(true)
-    setShowRecoveryModal(false)
-    // Notify the workflow process that user confirmed
-    process.emit('workflow:recovery-confirmed', true)
-  }
-
-  const handleRecoveryCancel = () => {
-    debug('[SHELL] Recovery plan cancelled')
-    ui.actions.confirmRecovery(false)
-    setShowRecoveryModal(false)
-    // Notify the workflow process that user cancelled
-    process.emit('workflow:recovery-confirmed', false)
-  }
 
   // Helper for visible items calculation
   const getVisibleItems = () => calculateVisibleItems(dimensions()?.height ?? 30)
@@ -164,20 +144,6 @@ export function useWorkflowShell(options: UseWorkflowShellOptions) {
     }
   })
 
-  // Auto-show recovery modal when recovery plan requires confirmation
-  createEffect(() => {
-    const s = state()
-    if (s.recoveryPlan?.needsRecovery && s.recoveryPlan.requiresConfirmation && !s.recoveryPlan.confirmed) {
-      debug('[SHELL] Recovery plan requires confirmation, showing modal')
-      setShowRecoveryModal(true)
-    } else if (s.recoveryPlan?.confirmed || !s.recoveryPlan?.needsRecovery) {
-      if (showRecoveryModal()) {
-        debug('[SHELL] Recovery plan confirmed or not needed, hiding modal')
-        setShowRecoveryModal(false)
-      }
-    }
-  })
-
   // Layout calculations
   const MIN_WIDTH_FOR_SPLIT_VIEW = 100
   const showOutputPanel = () => (dimensions()?.width ?? 80) >= MIN_WIDTH_FOR_SPLIT_VIEW
@@ -221,8 +187,7 @@ export function useWorkflowShell(options: UseWorkflowShellOptions) {
       modals.isChainConfirmActive() ||
       handlers.showStopModal() ||
       events.isErrorModalActive() ||
-      handlers.showControllerContinueModal() ||
-      showRecoveryModal(),
+      handlers.showControllerContinueModal(),
     isPromptBoxFocused: () => handlers.isPromptBoxFocused(),
     isWaitingForInput: computed.isWaitingForInput,
     hasQueuedPrompts: computed.hasQueuedPrompts,
@@ -280,11 +245,6 @@ export function useWorkflowShell(options: UseWorkflowShellOptions) {
     // Layout helpers
     showOutputPanel,
     getVisibleItems,
-    getMonitoringId,
-
-    // Recovery plan
-    showRecoveryModal,
-    handleRecoveryConfirm,
-    handleRecoveryCancel,
+    getMonitoringId
   }
 }

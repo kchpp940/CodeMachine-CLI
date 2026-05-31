@@ -7,7 +7,7 @@
 
 import type { WorkflowEvent } from "../../../../../workflows/events/index.js"
 import { debug } from "../../../../../shared/logging/logger.js"
-import type { AgentStatus, SubAgentState, LoopState, ChainedState, InputState, TriggeredAgentState, ControllerState, WorkflowState, WorkflowView, RecoveryPlanState } from "../state/types.js"
+import type { AgentStatus, SubAgentState, LoopState, ChainedState, InputState, TriggeredAgentState, ControllerState, WorkflowState, WorkflowView } from "../state/types.js"
 import { BaseUIAdapter } from "./base.js"
 import type { UIAdapterOptions } from "./types.js"
 import { timerService } from "@tui/shared/services"
@@ -68,10 +68,6 @@ export interface UIActions {
   setWorkflowView(view: WorkflowView): void
   /** Reset state for a new workflow */
   reset(workflowName: string): void
-  /** Set recovery plan state */
-  setRecoveryPlan(recoveryPlan: RecoveryPlanState | null): void
-  /** Mark recovery plan as confirmed */
-  confirmRecovery(confirmed: boolean): void
 }
 
 export interface OpenTUIAdapterOptions extends UIAdapterOptions {
@@ -375,19 +371,6 @@ export class OpenTUIAdapter extends BaseUIAdapter {
       // Monitoring registration
       case "monitoring:register":
         this.actions.registerMonitoringId(event.uiAgentId, event.monitoringId)
-        break
-
-      // Recovery plan events
-      case "recovery:plan":
-        debug('[ADAPTER] recovery:plan → needsRecovery=%s, requiresConfirmation=%s',
-          event.recoveryPlan?.needsRecovery ?? 'null',
-          event.recoveryPlan?.requiresConfirmation ?? 'null')
-        this.actions.setRecoveryPlan(event.recoveryPlan)
-        break
-
-      case "recovery:confirmed":
-        debug('[ADAPTER] recovery:confirmed → confirmed=%s', event.confirmed)
-        this.actions.confirmRecovery(event.confirmed)
         break
     }
   }

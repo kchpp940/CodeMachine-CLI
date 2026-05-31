@@ -14,7 +14,6 @@ import type {
   WorkflowStatus,
   WorkflowView,
   ControllerState,
-  RecoveryPlanState,
 } from "../../state/types"
 
 export type Listener = () => void
@@ -65,10 +64,6 @@ export type UIActions = {
   setWorkflowView(view: WorkflowView): void
   /** Reset state for a new workflow */
   reset(workflowName: string): void
-  /** Set recovery plan state */
-  setRecoveryPlan(recoveryPlan: RecoveryPlanState | null): void
-  /** Mark recovery plan as confirmed */
-  confirmRecovery(confirmed: boolean): void
 }
 
-export type { WorkflowState, AgentStatus, AgentTelemetry, LoopState, ChainedState, InputState, SubAgentState, TriggeredAgentState, WorkflowStatus, WorkflowView, ControllerState, RecoveryPlanState }
+export type { WorkflowState, AgentStatus, AgentTelemetry, LoopState, ChainedState, InputState, SubAgentState, TriggeredAgentState, WorkflowStatus, WorkflowView, ControllerState }

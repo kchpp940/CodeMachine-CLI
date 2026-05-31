@@ -231,42 +231,6 @@ export class StepIndexManager {
     await writeTrackingData(trackingPath, data);
   }
 
-  /**
-   * Marks a step as failed and cannot be resumed
-   */
-  async stepFailed(stepIndex: number, error?: string): Promise<void> {
-    logLifecycle(StepLifecyclePhase.FAILED, stepIndex, { error });
-
-    const { data, trackingPath } = await readTrackingData(this.cmRoot);
-    const completedSteps = data.completedSteps ?? {};
-    const key = String(stepIndex);
-
-    // Get or create step data
-    if (!completedSteps[key]) {
-      completedSteps[key] = {
-        sessionId: '',
-        monitoringId: 0,
-      };
-    }
-
-    // Mark as failed
-    completedSteps[key].failedAt = new Date().toISOString();
-    if (error) {
-      completedSteps[key].error = error;
-    }
-    // Remove completedChains - no longer needed
-    delete completedSteps[key].completedChains;
-
-    data.completedSteps = completedSteps;
-
-    // Remove from notCompletedSteps
-    if (data.notCompletedSteps) {
-      data.notCompletedSteps = data.notCompletedSteps.filter((idx) => idx !== stepIndex);
-    }
-
-    await writeTrackingData(trackingPath, data);
-  }
-
   // ============================================
   // Query Methods
   // ============================================

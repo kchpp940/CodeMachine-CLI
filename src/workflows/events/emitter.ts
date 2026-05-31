@@ -26,7 +26,6 @@ import type {
   WorkflowStatus,
   SubAgentState,
   TriggeredAgentState,
-  RecoveryPlanState,
 } from '../../cli/tui/routes/workflow/state/types.js';
 
 /**
@@ -492,37 +491,6 @@ export class WorkflowEventEmitter {
       type: 'monitoring:register',
       uiAgentId,
       monitoringId,
-    });
-  }
-
-  // ─────────────────────────────────────────────────────────────────
-  // Recovery Plan
-  // ─────────────────────────────────────────────────────────────────
-
-  /**
-   * Emit recovery plan state
-   */
-  setRecoveryPlan(recoveryPlan: RecoveryPlanState | null): void {
-    if (recoveryPlan) {
-      debug('[Emitter] recovery:plan needsRecovery=%s totalSteps=%d requiresConfirmation=%s',
-        recoveryPlan.needsRecovery, recoveryPlan.totalSteps, recoveryPlan.requiresConfirmation);
-    } else {
-      debug('[Emitter] recovery:plan cleared (null)');
-    }
-    this.bus.emit({
-      type: 'recovery:plan',
-      recoveryPlan,
-    });
-  }
-
-  /**
-   * Emit recovery confirmation result
-   */
-  recoveryConfirmed(confirmed: boolean): void {
-    debug('[Emitter] recovery:confirmed confirmed=%s', confirmed);
-    this.bus.emit({
-      type: 'recovery:confirmed',
-      confirmed,
     });
   }
 }

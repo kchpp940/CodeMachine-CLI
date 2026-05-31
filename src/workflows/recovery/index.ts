@@ -17,31 +17,19 @@ import { StatusService } from '../../agents/monitoring/index.js';
 
 import { detectCrashRecovery } from './detect.js';
 import { restoreFromCrash } from './restore.js';
-import { generateRecoveryPlan, formatRecoveryPlan } from './plan.js';
 import type {
   CrashDetectionResult,
   CrashRestoreContext,
   CrashRestoreResult,
-  RecoveryPlan,
-  RecoveryStepInfo,
-  RecoveryChainStatus,
-  StepRecoveryStatus,
-  GenerateRecoveryPlanOptions,
 } from './types.js';
 
 // Re-exports
 export { detectCrashRecovery, isCrashRecovery } from './detect.js';
 export { restoreFromCrash } from './restore.js';
-export { generateRecoveryPlan, formatRecoveryPlan } from './plan.js';
 export type {
   CrashDetectionResult,
   CrashRestoreContext,
   CrashRestoreResult,
-  RecoveryPlan,
-  RecoveryStepInfo,
-  RecoveryChainStatus,
-  StepRecoveryStatus,
-  GenerateRecoveryPlanOptions,
 } from './types.js';
 
 /**

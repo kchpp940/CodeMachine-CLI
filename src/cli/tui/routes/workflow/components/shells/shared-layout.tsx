@@ -18,7 +18,6 @@ import {
   ControllerContinueModal
 } from "../modals"
 import { ChainConfirmModal } from "../output/prompt-line/chain-confirm-modal"
-import { RecoveryPlanModal } from "../recovery-plan-modal"
 import type { useWorkflowShell } from "../../hooks/use-workflow-shell"
 
 export interface SharedLayoutProps {
@@ -172,17 +171,6 @@ export function SharedLayout(props: SharedLayoutProps) {
               shell.modals.onChainConfirmResolve?.(false)
               shell.modals.hideChainConfirm()
             }}
-          />
-        </box>
-      </Show>
-
-      {/* Recovery Plan Confirmation Modal */}
-      <Show when={shell.showRecoveryModal() && shell.state().recoveryPlan}>
-        <box position="absolute" left={0} top={0} width="100%" height="100%" zIndex={2500}>
-          <RecoveryPlanModal
-            recoveryPlan={shell.state().recoveryPlan!}
-            onConfirm={shell.handleRecoveryConfirm}
-            onCancel={shell.handleRecoveryCancel}
           />
         </box>
       </Show>

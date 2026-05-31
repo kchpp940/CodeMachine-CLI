@@ -2,9 +2,18 @@
  * Import command for CodeMachine
  *
  * Usage:
- *   codemachine import <source>           Install/update an import
- *   codemachine import --list             List installed imports
- *   codemachine import --remove <name>    Remove an import
+ *   codemachine import <source>                 Install/update an import
+ *   codemachine import --list                   List installed imports
+ *   codemachine import --remove <name>          Remove an import
+ *   codemachine import --update <name>          Update an installed import
+ *
+ * Version strategies:
+ *   --pin <ref>    Pin to a specific commit/tag/branch (e.g., --pin v1.0.0)
+ *   --keep         Keep current version, don't modify files or registry
+ *   --update       Force update to latest version from source (default)
+ *
+ * Source rebinding:
+ *   --force        Force rebind to a different source (bypasses consistency check)
  *
  * Source formats:
  *   - Local path: /path/to/folder or ./relative/path (requires .codemachine.json)
@@ -13,187 +22,50 @@
  */
 
 import type { Command } from 'commander';
-import { existsSync, rmSync, cpSync } from 'node:fs';
-import { spawn } from 'node:child_process';
-import { join } from 'node:path';
+import { existsSync, rmSync } from 'node:fs';
 import {
-  resolveSource,
-  extractRepoName,
-  ensureImportsDir,
-  getImportInstallPath,
-  isImportInstalled,
-  validateImport,
-  parseManifest,
-  registerImport,
+  installPackage,
+  updatePackage,
   unregisterImport,
   getAllInstalledImports,
   getInstalledImport,
+  updateImportVersionStrategy,
 } from '../../shared/imports/index.js';
+import type { InstallPackageOptions } from '../../shared/imports/installer.js';
 
 interface ImportCommandOptions {
   list?: boolean;
   remove?: boolean;
+  update?: boolean;
   verbose?: boolean;
+  pin?: string;
+  keep?: boolean;
+  force?: boolean;
 }
 
 /**
- * Clone a git repository
+ * Determine install options from command options
  */
-async function cloneRepo(
-  url: string,
-  destPath: string,
-  verbose: boolean
-): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const args = ['clone', '--depth', '1', url, destPath];
-
-    if (verbose) {
-      console.log(`  Running: git ${args.join(' ')}`);
-    }
-
-    const proc = spawn('git', args, {
-      stdio: verbose ? 'inherit' : 'pipe',
-    });
-
-    let stderr = '';
-
-    if (!verbose && proc.stderr) {
-      proc.stderr.on('data', (data: Buffer) => {
-        stderr += data.toString();
-      });
-    }
-
-    proc.on('close', (code: number | null) => {
-      if (code === 0) {
-        resolve();
-      } else {
-        reject(new Error(`git clone failed with code ${code}: ${stderr}`));
-      }
-    });
-
-    proc.on('error', (err: Error) => {
-      reject(new Error(`Failed to run git: ${err.message}`));
-    });
-  });
-}
-
-/**
- * Remove .git directory from cloned repo
- */
-function removeGitDir(repoPath: string): void {
-  const gitDir = join(repoPath, '.git');
-  if (existsSync(gitDir)) {
-    rmSync(gitDir, { recursive: true, force: true });
+function getInstallOptions(options: ImportCommandOptions): InstallPackageOptions {
+  if (typeof options.pin === 'string') {
+    return { versionStrategy: 'pin', pinRef: options.pin, forceRebind: options.force };
   }
-}
-
-/**
- * Copy a local folder to the imports directory
- */
-function copyLocalFolder(
-  sourcePath: string,
-  destPath: string,
-  verbose: boolean
-): void {
-  if (verbose) {
-    console.log(`  Copying from: ${sourcePath}`);
-    console.log(`  Copying to: ${destPath}`);
+  if (options.keep) {
+    return { versionStrategy: 'keep', forceRebind: options.force };
   }
-
-  cpSync(sourcePath, destPath, { recursive: true });
-
-  // Remove .git directory if present in the copied folder
-  removeGitDir(destPath);
-}
-
-/**
- * Install an import from a source
- */
-async function installImport(source: string, verbose: boolean): Promise<void> {
-  console.log(`\nResolving source: ${source}`);
-
-  // Resolve the source to a clone URL
-  const resolved = await resolveSource(source);
-
-  if (verbose) {
-    console.log(`  Type: ${resolved.type}`);
-    console.log(`  URL: ${resolved.url}`);
-    console.log(`  Repo: ${resolved.repoName}`);
-    if (resolved.owner) {
-      console.log(`  Owner: ${resolved.owner}`);
-    }
-  }
-
-  const installPath = getImportInstallPath(resolved.repoName);
-
-  // Check if already installed
-  if (isImportInstalled(resolved.repoName)) {
-    console.log(`\nUpdating existing import: ${resolved.repoName}`);
-    // Remove existing installation
-    rmSync(installPath, { recursive: true, force: true });
-  } else {
-    console.log(`\nInstalling: ${resolved.repoName}`);
-  }
-
-  // Ensure imports directory exists
-  ensureImportsDir();
-
-  // Handle local paths vs git URLs
-  if (resolved.type === 'local-path') {
-    console.log('  Copying local folder...');
-    copyLocalFolder(resolved.url, installPath, verbose);
-  } else {
-    // Clone the repository
-    console.log('  Cloning repository...');
-    await cloneRepo(resolved.url, installPath, verbose);
-
-    // Remove .git directory (we don't need version control for imports)
-    removeGitDir(installPath);
-  }
-
-  // Validate the import
-  console.log('  Validating...');
-  const validation = validateImport(installPath);
-
-  if (!validation.valid) {
-    // Invalid import, remove it
-    rmSync(installPath, { recursive: true, force: true });
-    console.error('\n❌ Validation failed:');
-    validation.errors.forEach((err) => console.error(`   - ${err}`));
-    throw new Error('Import validation failed');
-  }
-
-  // Show warnings if any
-  if (validation.warnings.length > 0) {
-    console.log('\n⚠️  Warnings:');
-    validation.warnings.forEach((warn) => console.log(`   - ${warn}`));
-  }
-
-  // Register the import
-  const manifest = parseManifest(installPath);
-  if (!manifest) {
-    rmSync(installPath, { recursive: true, force: true });
-    throw new Error('Failed to parse manifest after validation');
-  }
-
-  registerImport(resolved.repoName, manifest, source);
-
-  console.log(`\n✅ Successfully installed: ${manifest.name} v${manifest.version}`);
-  console.log(`   Location: ${installPath}`);
+  return { versionStrategy: 'update', forceRebind: options.force };
 }
 
 /**
  * Remove an installed import
  */
 async function removeImport(name: string): Promise<void> {
-  // Try to find by package name first
   let installed = getInstalledImport(name);
 
-  // If not found, try to find by repo name
   if (!installed) {
     const allImports = getAllInstalledImports();
     installed = allImports.find(
-      (imp) => imp.path.endsWith(name) || imp.path.endsWith(`/${name}`)
+      (imp) => imp.repoName === name || imp.path.endsWith(`/${name}`)
     );
   }
 
@@ -205,21 +77,51 @@ async function removeImport(name: string): Promise<void> {
 
   console.log(`\nRemoving: ${installed.name}`);
 
-  // Remove from filesystem
   if (existsSync(installed.path)) {
     rmSync(installed.path, { recursive: true, force: true });
   }
 
-  // Unregister
   unregisterImport(installed.name);
 
   console.log(`✅ Successfully removed: ${installed.name}`);
 }
 
 /**
- * List all installed imports
+ * Update an installed import
  */
-function listImports(): void {
+async function updateImport(name: string, verbose: boolean = false): Promise<void> {
+  console.log(`\nUpdating: ${name}`);
+
+  const result = await updatePackage(name);
+
+  if (!result.success) {
+    console.error(`\n❌ Update failed: ${result.error}`);
+    if (result.errorDetails) {
+      console.error(`   ${result.errorDetails}`);
+    }
+    process.exitCode = 1;
+    return;
+  }
+
+  if (result.skipped) {
+    console.log(`✅ Already up to date: ${result.name} v${result.version}`);
+  } else if (result.previousVersion && result.previousVersion !== result.newVersion) {
+    console.log(`✅ Updated: ${result.name} v${result.previousVersion} → v${result.newVersion}`);
+  } else {
+    console.log(`✅ Updated: ${result.name} v${result.version}`);
+  }
+
+  if (result.sourceDigest && verbose) {
+    const typeLabel = result.digestType === 'content-hash' ? ' (content)' : '';
+    console.log(`   Digest: ${result.sourceDigest}${typeLabel}`);
+  }
+  console.log(`   Location: ${result.location}`);
+}
+
+/**
+ * List all installed imports with detailed information
+ */
+function listImports(verbose: boolean = false): void {
   const imports = getAllInstalledImports();
 
   if (imports.length === 0) {
@@ -235,14 +137,127 @@ function listImports(): void {
   console.log('\nInstalled imports:\n');
 
   for (const imp of imports) {
-    console.log(`  ${imp.name} v${imp.version}`);
+    let statusLabel = '';
+    if (imp.versionStrategy === 'pin' && imp.pinnedRef) {
+      const digestInfo = imp.sourceDigest ? ` → ${imp.sourceDigest}` : '';
+      statusLabel = ` [pinned: ${imp.pinnedRef}${digestInfo}]`;
+    } else if (imp.versionStrategy === 'pin') {
+      statusLabel = imp.sourceDigest ? ` [pinned @ ${imp.sourceDigest}]` : ' [pinned]';
+    } else if (imp.versionStrategy === 'keep') {
+      statusLabel = ' [keep]';
+    }
+
+    console.log(`  ${imp.name} v${imp.version}${statusLabel}`);
     console.log(`    Source: ${imp.source}`);
+    console.log(`    Type: ${imp.sourceType}`);
+
+    if (verbose) {
+      console.log(`    Source URL: ${imp.sourceUrl}`);
+      if (imp.owner) {
+        console.log(`    Owner: ${imp.owner}`);
+      }
+      console.log(`    Repo: ${imp.repoName}`);
+      if (imp.sourceDigest) {
+        const typeLabel = imp.digestType === 'content-hash' ? ' (content)' : '';
+        console.log(`    Source digest: ${imp.sourceDigest}${typeLabel}`);
+      }
+      if (imp.pinnedRef) {
+        console.log(`    Pinned ref: ${imp.pinnedRef}`);
+      }
+      if (imp.versionStrategy) {
+        console.log(`    Strategy: ${imp.versionStrategy}`);
+      }
+    } else {
+      if (imp.sourceDigest && imp.versionStrategy !== 'pin') {
+        const typeLabel = imp.digestType === 'content-hash' ? ' (content)' : '';
+        console.log(`    Digest: ${imp.sourceDigest}${typeLabel}`);
+      }
+    }
+
     console.log(`    Path: ${imp.path}`);
-    console.log(`    Installed: ${new Date(imp.installedAt).toLocaleDateString()}`);
+    console.log(`    Installed: ${new Date(imp.installedAt).toLocaleString()}`);
+
+    if (imp.updatedAt) {
+      console.log(`    Last updated: ${new Date(imp.updatedAt).toLocaleString()}`);
+    }
+
     console.log('');
   }
 
   console.log(`Total: ${imports.length} import(s)`);
+}
+
+/**
+ * Install an import from a source
+ */
+async function installImport(
+  source: string,
+  options: ImportCommandOptions
+): Promise<void> {
+  const installOpts = getInstallOptions(options);
+  const { versionStrategy, pinRef } = installOpts;
+
+  const strategyLabel = versionStrategy !== 'update'
+    ? ` (strategy: ${versionStrategy}${pinRef ? ` @ ${pinRef}` : ''})`
+    : '';
+
+  console.log(`\nInstalling: ${source}${strategyLabel}`);
+
+  if (options.verbose) {
+    console.log(`  Version strategy: ${versionStrategy}`);
+    if (pinRef) {
+      console.log(`  Pin ref: ${pinRef}`);
+    }
+  }
+
+  const result = await installPackage(source, installOpts);
+
+  if (!result.success) {
+    console.error(`\n❌ Installation failed: ${result.error}`);
+    if (result.errorDetails) {
+      console.error(`   ${result.errorDetails}`);
+    }
+    process.exitCode = 1;
+    return;
+  }
+
+  if (result.skipped) {
+    let reason = 'unknown reason';
+    switch (result.skippedReason) {
+      case 'keep-strategy':
+        reason = 'keep strategy - no changes';
+        break;
+      case 'already-at-ref':
+        reason = 'already at pinned digest';
+        break;
+      case 'already-installed':
+        reason = 'already installed';
+        break;
+    }
+    console.log(`✅ Skipped (${reason}): ${result.name} v${result.version}`);
+    if (result.pinnedRef) {
+      const digestInfo = result.sourceDigest ? ` (resolved: ${result.sourceDigest})` : '';
+      console.log(`   Pinned: ${result.pinnedRef}${digestInfo}`);
+    }
+    return;
+  }
+
+  if (result.previousVersion && result.previousVersion !== result.newVersion) {
+    console.log(`\n✅ Updated: ${result.name} v${result.previousVersion} → v${result.newVersion}`);
+  } else if (result.previousVersion) {
+    console.log(`\n✅ Reinstalled: ${result.name} v${result.version}`);
+  } else {
+    console.log(`\n✅ Successfully installed: ${result.name} v${result.version}`);
+  }
+
+  if (result.pinnedRef) {
+    const digestInfo = result.sourceDigest ? ` (resolved: ${result.sourceDigest})` : '';
+    console.log(`   Pinned: ${result.pinnedRef}${digestInfo}`);
+  } else if (result.sourceDigest) {
+    const typeLabel = result.digestType === 'content-hash' ? ' (content)' : '';
+    console.log(`   Digest: ${result.sourceDigest}${typeLabel}`);
+  }
+  console.log(`   Location: ${result.location}`);
 }
 
 /**
@@ -253,13 +268,11 @@ async function runImportCommand(
   options: ImportCommandOptions
 ): Promise<void> {
   try {
-    // List mode
     if (options.list) {
-      listImports();
+      listImports(options.verbose);
       return;
     }
 
-    // Remove mode
     if (options.remove) {
       if (!source) {
         console.error('❌ Please specify an import to remove.');
@@ -270,7 +283,16 @@ async function runImportCommand(
       return;
     }
 
-    // Install mode (default)
+    if (options.update) {
+      if (!source) {
+        console.error('❌ Please specify an import to update.');
+        console.log('Usage: codemachine import --update <name>');
+        return;
+      }
+      await updateImport(source, options.verbose);
+      return;
+    }
+
     if (!source) {
       console.error('❌ Please specify a source to import.');
       console.log('\nUsage:');
@@ -279,13 +301,20 @@ async function runImportCommand(
       console.log(`  codemachine import <https://github.com/...>`);
       console.log(`  codemachine import </path/to/folder>   (local path with .codemachine.json)`);
       console.log(`  codemachine import <./relative/path>   (local path with .codemachine.json)`);
+      console.log('\nVersion strategies:');
+      console.log('  --pin <ref>    Pin to specific commit/tag/branch (e.g., --pin v1.0.0)');
+      console.log('  --keep         Keep current version, no changes');
+      console.log('  --update       Force update to latest (default)');
       console.log('\nOther options:');
-      console.log('  codemachine import --list            List installed imports');
-      console.log('  codemachine import --remove <name>   Remove an import');
+      console.log('  -l, --list            List installed imports');
+      console.log('  -r, --remove <name>   Remove an import');
+      console.log('  -u, --update <name>   Update an installed import');
+      console.log('  -v, --verbose         Verbose output');
+      console.log('      --force           Force rebind to different source');
       return;
     }
 
-    await installImport(source, options.verbose ?? false);
+    await installImport(source, options);
   } catch (error) {
     console.error(
       '\n❌ Error:',
@@ -304,7 +333,11 @@ export function registerImportCommand(program: Command): void {
     .description('Import external workflow packages')
     .option('-l, --list', 'List installed imports')
     .option('-r, --remove', 'Remove an import')
+    .option('-u, --update', 'Update an installed import')
     .option('-v, --verbose', 'Verbose output')
+    .option('--pin <ref>', 'Pin to a specific commit/tag/branch')
+    .option('--keep', 'Keep current version, no modifications')
+    .option('--force', 'Force rebind to a different source')
     .action(async (source: string | undefined, options: ImportCommandOptions) => {
       await runImportCommand(source, options);
     });

@@ -107,8 +107,6 @@ export type ModuleName = ModuleStep['agentId'];
 export interface RunWorkflowOptions {
   cwd?: string;
   templatePath?: string;
-  /** Explicit confirmation to resume workflow (--yes/--resume-confirmed flag) */
-  resumeConfirmed?: boolean;
 }
 
 export interface TaskManagerOptions {

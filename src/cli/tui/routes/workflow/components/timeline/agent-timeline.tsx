@@ -9,7 +9,7 @@
 
 import { For, Show, createMemo } from "solid-js"
 import { useTheme } from "@tui/shared/context/theme"
-import type { WorkflowState, RecoveryStepInfo } from "../../state/types"
+import type { WorkflowState } from "../../state/types"
 import { getTimelineLayout } from "../../state/navigation"
 import { MainAgentNode } from "./main-agent-node"
 import { SubAgentSummary } from "./sub-agent-summary"
@@ -40,29 +40,13 @@ export function AgentTimeline(props: AgentTimelineProps) {
 
   const totalItems = () => layout().length
 
-  // Lookup recovery info by agent ID
-  const getRecoveryInfo = (agentId: string): RecoveryStepInfo | undefined => {
-    if (!props.state.recoveryPlan) return undefined
-    return props.state.recoveryPlan.steps.find(
-      s => `agent-${s.stepIndex}` === agentId || s.agentId === agentId
-    )
-  }
-
-  // Header with total count and recovery summary
+  // Header with total count
   const headerSuffix = () => {
     const total = totalItems()
-    const parts: string[] = []
     if (total > 0) {
-      parts.push(`${total} items`)
+      return ` (${total} items)`
     }
-    if (props.state.recoveryPlan?.needsRecovery) {
-      const rp = props.state.recoveryPlan
-      if (rp.completedSteps > 0) parts.push(`${rp.completedSteps} done`)
-      if (rp.resumableSteps > 0) parts.push(`${rp.resumableSteps} to resume`)
-      if (rp.failedSteps > 0) parts.push(`${rp.failedSteps} failed`)
-      if (rp.notStartedSteps > 0) parts.push(`${rp.notStartedSteps} pending`)
-    }
-    return parts.length > 0 ? ` (${parts.join(", ")})` : ""
+    return ""
   }
 
   // Check if item is selected
@@ -105,7 +89,7 @@ export function AgentTimeline(props: AgentTimelineProps) {
 
               // Main agent
               if (item.type === "main") {
-                return <MainAgentNode agent={item.agent} isSelected={isMainSelected(item.id)} availableWidth={props.availableWidth} recoveryInfo={getRecoveryInfo(item.id)} />
+                return <MainAgentNode agent={item.agent} isSelected={isMainSelected(item.id)} availableWidth={props.availableWidth} />
               }
 
               // Sub-agent summary (collapsed)

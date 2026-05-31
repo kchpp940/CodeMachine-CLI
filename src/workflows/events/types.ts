@@ -15,7 +15,6 @@ import type {
   WorkflowStatus,
   SubAgentState,
   TriggeredAgentState,
-  RecoveryPlanState,
 } from '../../cli/tui/routes/workflow/state/types.js';
 
 /**
@@ -143,10 +142,6 @@ export type WorkflowEvent =
 
   // Progress tracking (step indicator)
   | { type: 'progress:state'; progress: ProgressState | null }
-
-  // Recovery plan events
-  | { type: 'recovery:plan'; recoveryPlan: RecoveryPlanState | null }
-  | { type: 'recovery:confirmed'; confirmed: boolean }
 
   // Onboarding events
   | { type: 'onboard:started'; config: OnboardConfig }

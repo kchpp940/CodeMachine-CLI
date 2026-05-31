@@ -13,6 +13,8 @@ export type {
   ResolvedSource,
   ImportOptions,
   ValidationResult,
+  VersionStrategy,
+  SourceConsistencyCheck,
 } from './types.js';
 
 // Path utilities
@@ -45,7 +47,11 @@ export {
   getAllInstalledImports,
   isImportRegistered,
   getImportRoots,
+  checkSourceConsistency,
+  findImportBySource,
+  updateImportVersionStrategy,
 } from './registry.js';
+export type { RegisterImportMetadata } from './registry.js';
 
 // Source resolution
 export {
@@ -74,5 +80,5 @@ export {
 } from './auto-import.js';
 
 // Shared installer
-export { installPackage, updatePackage } from './installer.js';
+export { installPackage, updatePackage, getImportDetails } from './installer.js';
 export type { InstallResult } from './installer.js';

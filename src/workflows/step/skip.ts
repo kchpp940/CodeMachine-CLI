@@ -17,7 +17,6 @@ import { debug } from '../../shared/logging/logger.js';
 import type { ActiveLoop } from '../directives/loop/types.js';
 import type { StepIndexManager } from '../indexing/index.js';
 import { StatusService } from '../../agents/monitoring/index.js';
-import type { RecoveryPlan, StepRecoveryStatus } from '../recovery/types.js';
 
 // Re-export for backwards compatibility
 export type { ActiveLoop };
@@ -29,8 +28,6 @@ export interface SkipCheckOptions {
   indexManager: StepIndexManager;
   uniqueAgentId?: string;
   emitter?: WorkflowEventEmitter;
-  /** Confirmed recovery plan - the single source of truth for resume decisions */
-  recoveryPlan?: RecoveryPlan;
 }
 
 /**
@@ -51,7 +48,6 @@ export async function shouldSkipStep(
     indexManager,
     uniqueAgentId,
     emitter,
-    recoveryPlan,
   } = options;
 
   // Non-module steps (separators, etc.) can't be skipped
@@ -63,34 +59,6 @@ export async function shouldSkipStep(
   const agentId = uniqueAgentId ?? step.agentId;
 
   const status = StatusService.getInstance();
-
-  // Check recovery plan first - this is the single source of truth for resume
-  // Skip FAILED steps that the recovery plan says cannot be resumed
-  if (recoveryPlan) {
-    const recoveryInfo = recoveryPlan.steps.find(s => s.stepIndex === index);
-    if (recoveryInfo) {
-      // Step is marked as completed in recovery plan - skip it
-      if (recoveryInfo.status === StepRecoveryStatus.COMPLETED) {
-        debug('[Indexing:Skip] Step %d (%s) skipped - recovery plan says completed', index, step.agentName);
-        status.completed(agentId);
-        if (emitter) {
-          emitter.updateAgentStatus(agentId, 'completed');
-        }
-        return { skip: true, reason: `${step.agentName} skipped (recovery plan: completed).` };
-      }
-      // Step is marked as failed in recovery plan - skip and mark as failed
-      if (recoveryInfo.status === StepRecoveryStatus.FAILED) {
-        debug('[Indexing:Skip] Step %d (%s) skipped - recovery plan says failed: %s', index, step.agentName, recoveryInfo.error);
-        status.failed(agentId);
-        if (emitter) {
-          emitter.updateAgentStatus(agentId, 'failed');
-        }
-        // Mark step as failed in index manager so it's not re-executed
-        await indexManager.stepFailed(index, recoveryInfo.error);
-        return { skip: true, reason: `${step.agentName} skipped (recovery plan: failed - ${recoveryInfo.error}).` };
-      }
-    }
-  }
 
   // Skip step if executeOnce is true and it's already completed
   if (step.executeOnce) {

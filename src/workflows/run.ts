@@ -31,9 +31,6 @@ import { getUniqueAgentId } from './context/index.js';
 import { runControllerView } from './controller/view.js';
 import { getAllInstalledImports } from '../shared/imports/index.js';
 import { registerImportedAgents, clearImportedAgents } from './utils/config.js';
-import { generateRecoveryPlan, formatRecoveryPlan } from './recovery/index.js';
-import type { RecoveryPlanState } from '../cli/tui/routes/workflow/state/types.js';
-import type { RecoveryPlan } from './recovery/types.js';
 
 // Re-export from preflight for backward compatibility
 export { ValidationError, checkWorkflowCanStart, checkSpecificationRequired, checkOnboardingRequired, needsOnboarding } from './preflight.js';
@@ -176,10 +173,11 @@ export async function runWorkflow(options: RunWorkflowOptions = {}): Promise<voi
   const status = StatusService.getInstance();
   status.setEmitter(emitter);
 
-  // Get resume info (used as input to recovery plan generation, NOT as the final start index)
+  // Get resume info
   const resumeInfo = await indexManager.getResumeInfo();
+  const startIndex = resumeInfo.startIndex;
   debug('[Workflow] ========== STEP DECISION ==========');
-  debug('[Workflow] Resume info: startIndex=%d, decision=%s', resumeInfo.startIndex, resumeInfo.decision);
+  debug('[Workflow] Resume info: startIndex=%d, decision=%s', startIndex, resumeInfo.decision);
 
   // Load track and conditions selections
   const selectedTrack = await getSelectedTrack(cmRoot);
@@ -226,111 +224,8 @@ export async function runWorkflow(options: RunWorkflowOptions = {}): Promise<voi
   // Count module steps for total
   const moduleSteps = visibleSteps.filter(s => s.type === 'module');
 
-  // Build visible steps array with template indices
-  const visibleStepsWithIndices = visibleSteps.map((step, idx) => ({
-    step,
-    templateIndex: idx,
-  }));
-
-  // Load step data for all module steps
-  const stepDataMap = new Map<number, import('./indexing/types.js').StepData | null>();
-  let moduleIdx = 0;
-  for (const vs of visibleStepsWithIndices) {
-    if (vs.step.type === 'module') {
-      const stepData = await indexManager.getStepData(moduleIdx);
-      stepDataMap.set(moduleIdx, stepData);
-      moduleIdx++;
-    }
-  }
-
-  // Generate recovery plan
-  const recoveryPlan = await generateRecoveryPlan({
-    template,
-    moduleSteps,
-    visibleSteps: visibleStepsWithIndices,
-    resumeInfo,
-    stepDataMap,
-    cwd,
-    cmRoot,
-  });
-
-  // Convert recovery plan to TUI state format (single source of truth)
-  const recoveryPlanState: RecoveryPlanState | null = recoveryPlan.needsRecovery
-    ? {
-        needsRecovery: recoveryPlan.needsRecovery,
-        startIndex: recoveryPlan.startIndex,
-        totalSteps: recoveryPlan.totalSteps,
-        completedSteps: recoveryPlan.completedSteps,
-        resumableSteps: recoveryPlan.resumableSteps,
-        failedSteps: recoveryPlan.failedSteps,
-        notStartedSteps: recoveryPlan.notStartedSteps,
-        steps: recoveryPlan.steps.map(s => ({
-          stepIndex: s.stepIndex,
-          templateIndex: s.templateIndex,
-          agentId: s.agentId,
-          agentName: s.agentName,
-          status: s.status,
-          sessionId: s.sessionId,
-          monitoringId: s.monitoringId,
-          agentStatus: s.agentStatus,
-          chains: s.chains,
-          nextChainIndex: s.nextChainIndex,
-          totalChains: s.totalChains,
-          error: s.error,
-        })),
-        summary: recoveryPlan.summary,
-        requiresConfirmation: recoveryPlan.requiresConfirmation,
-        confirmed: false,
-      }
-    : null;
-
-  // Emit recovery plan to event bus (for TUI display)
-  // This is the single source of truth - CLI, TUI, monitoring DB, step index all use this
-  emitter.setRecoveryPlan(recoveryPlanState);
-
-  // Recovery plan confirmation is a hard gate - must confirm before any execution proceeds
-  // The startIndex comes ONLY from the confirmed recovery plan, never from raw resumeInfo
-  // Recovery execution MUST always come from a confirmed recovery plan - no bypass
-  let confirmedStartIndex = 0;
-  let confirmedRecoveryPlan: RecoveryPlan | undefined;
-
-  if (recoveryPlan.needsRecovery) {
-    if (recoveryPlan.requiresConfirmation) {
-      // For TTY environments, display the plan for the user to review in modal
-      // For non-TTY, waitForRecoveryConfirmation will handle printing to stderr
-      if (process.stdout.isTTY) {
-        console.log(formatRecoveryPlan(recoveryPlan));
-      }
-
-      // Block until user explicitly confirms
-      // - TTY: wait for TUI modal interaction
-      // - Non-TTY: fail unless --resume-confirmed is explicitly passed
-      const confirmed = await waitForRecoveryConfirmation(options.resumeConfirmed, recoveryPlan);
-
-      if (!confirmed) {
-        debug('[Workflow] Recovery cancelled or requires explicit confirmation flag');
-        // For non-TTY environments, exit cleanly without creating runner
-        // We already printed the recovery plan in waitForRecoveryConfirmation
-        if (!process.stdout.isTTY) {
-          process.exit(1);
-        }
-        // For TTY environments, throw error to trigger UI error modal
-        emitter.setWorkflowStatus('stopped');
-        throw new Error('Workflow recovery cancelled - requires explicit confirmation (--resume-confirmed or interactive confirmation)');
-      }
-
-      debug('[Workflow] Recovery confirmed');
-      emitter.recoveryConfirmed(true);
-    }
-
-    // Start index comes from the confirmed recovery plan (single source of truth)
-    confirmedStartIndex = recoveryPlan.startIndex;
-    confirmedRecoveryPlan = recoveryPlan;
-    debug('[Workflow] Using confirmed recovery plan startIndex=%d', confirmedStartIndex);
-  }
-
-  // Initialize index manager with the confirmed start index from recovery plan
-  indexManager.setCurrentStepIndex(confirmedStartIndex);
+  // Initialize index manager with start index
+  indexManager.setCurrentStepIndex(startIndex);
 
   // Run controller view FIRST if needed (blocks until controller done + user confirms)
   // Timeline population happens AFTER controller view since it's only visible in executing view
@@ -353,8 +248,8 @@ export async function runWorkflow(options: RunWorkflowOptions = {}): Promise<voi
   }
 
   // If controller ran, adjust start index to skip the controller agent step
-  let actualStartIndex = confirmedStartIndex;
-  if (controllerResult.ran && confirmedStartIndex === 0 && moduleSteps.length > 0) {
+  let actualStartIndex = startIndex;
+  if (controllerResult.ran && startIndex === 0 && moduleSteps.length > 0) {
     const firstStep = moduleSteps[0];
     // Only skip if the first step is the controller agent
     if (firstStep.agentId === controllerResult.agentId) {
@@ -379,7 +274,7 @@ export async function runWorkflow(options: RunWorkflowOptions = {}): Promise<voi
 
   // Pre-populate timeline
   debug('[Workflow] ========== TIMELINE POPULATION ==========');
-  debug('[Workflow] confirmedStartIndex=%d, actualStartIndex=%d, total moduleSteps=%d', confirmedStartIndex, actualStartIndex, moduleSteps.length);
+  debug('[Workflow] startIndex=%d, actualStartIndex=%d, total moduleSteps=%d', startIndex, actualStartIndex, moduleSteps.length);
   let moduleIndex = 0;
   for (let stepIndex = 0; stepIndex < visibleSteps.length; stepIndex++) {
     const step = visibleSteps[stepIndex];
@@ -432,7 +327,7 @@ export async function runWorkflow(options: RunWorkflowOptions = {}): Promise<voi
     actualStartIndex, moduleSteps.length - actualStartIndex);
   debug('[Workflow] ========== END STEP DECISION ==========');
 
-  // Create and run workflow - ONLY use confirmed recovery plan as the single source of truth
+  // Create and run workflow
   const runner = new WorkflowRunner({
     cwd,
     cmRoot,
@@ -441,7 +336,6 @@ export async function runWorkflow(options: RunWorkflowOptions = {}): Promise<voi
     startIndex: actualStartIndex,
     indexManager,
     status,
-    recoveryPlan: confirmedRecoveryPlan,
   });
 
   try {
@@ -464,51 +358,6 @@ export async function runWorkflow(options: RunWorkflowOptions = {}): Promise<voi
       // Never resolves - Ctrl+C exits
     });
   }
-}
-
-/**
- * Wait for recovery confirmation.
- *
- * This is a truly blocking decision point - the Promise only resolves when the
- * user explicitly confirms or cancels.
- *
- * For non-interactive environments (CI/CD, non-TTY):
- * - Default behavior: Output the recovery plan and FAIL to prevent accidental resume
- * - Only auto-confirm if explicitly passed `--resume-confirmed` or `--yes` flag
- *
- * @param resumeConfirmed - Explicit confirmation flag from CLI (--yes/--resume-confirmed)
- * @param recoveryPlan - The recovery plan to display in non-TTY environments
- * @returns Promise that resolves to true if confirmed, false if cancelled
- */
-async function waitForRecoveryConfirmation(
-  resumeConfirmed: boolean | undefined,
-  recoveryPlan: RecoveryPlan
-): Promise<boolean> {
-  // Non-TTY / non-interactive environment
-  if (!process.stdout.isTTY) {
-    if (resumeConfirmed) {
-      // Explicitly confirmed via CLI flag - auto-confirm
-      debug('[Recovery] Non-TTY environment, auto-confirming recovery (--resume-confirmed)');
-      return true;
-    }
-
-    // Default: output plan and fail - no accidental resume in CI
-    console.error('\n❌ Workflow recovery requires explicit confirmation in non-interactive environments.');
-    console.error(formatRecoveryPlan(recoveryPlan));
-    console.error('\nTo proceed with this recovery plan, re-run with --resume-confirmed or --yes flag.');
-    return false;
-  }
-
-  // TTY / interactive environment - wait for TUI modal confirmation
-  return new Promise<boolean>((resolve) => {
-    const handleConfirmation = (confirmed: boolean) => {
-      debug('[Recovery] Received confirmation from TUI: confirmed=%s', confirmed);
-      (process as NodeJS.EventEmitter).off('workflow:recovery-confirmed', handleConfirmation);
-      resolve(confirmed);
-    };
-
-    (process as NodeJS.EventEmitter).on('workflow:recovery-confirmed', handleConfirmation);
-  });
 }
 
 export default runWorkflow;
