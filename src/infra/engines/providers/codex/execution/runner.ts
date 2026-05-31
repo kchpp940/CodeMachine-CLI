@@ -7,7 +7,7 @@ import { buildCodexCommand } from './commands.js';
 import { metadata } from '../metadata.js';
 import { expandHomeDir } from '../../../../../shared/utils/index.js';
 import { ENV } from '../config.js';
-import type { ParsedTelemetry } from '../../../core/types.js';
+import type { ParsedTelemetry, EngineOverrideContext } from '../../../core/types.js';
 import { formatThinking, formatCommand, formatResult, formatMessage, formatStatus, formatMcpCall, formatMcpResult } from '../../../../../shared/formatters/outputMarkers.js';
 import { debug } from '../../../../../shared/logging/logger.js';
 
@@ -112,7 +112,8 @@ export interface RunCodexOptions {
   onTelemetry?: (telemetry: ParsedTelemetry) => void;
   onSessionId?: (sessionId: string) => void;
   abortSignal?: AbortSignal;
-  timeout?: number; // Timeout in milliseconds (default: 1800000ms = 30 minutes)
+  timeout?: number;
+  override?: EngineOverrideContext;
 }
 
 export interface RunCodexResult {
@@ -211,7 +212,7 @@ function formatCodexStreamJsonLine(line: string): string | null {
 }
 
 export async function runCodex(options: RunCodexOptions): Promise<RunCodexResult> {
-  const { prompt, workingDir, resumeSessionId, resumePrompt, model, modelReasoningEffort, env, onData, onErrorData, onTelemetry, onSessionId, abortSignal, timeout = 1800000 } = options;
+  const { prompt, workingDir, resumeSessionId, resumePrompt, model, modelReasoningEffort, env, onData, onErrorData, onTelemetry, onSessionId, abortSignal, timeout = 1800000, override } = options;
 
   // DEBUG: Log resume parameters
   debug(`[DEBUG codex runner.ts] runCodex called with resumeSessionId=${resumeSessionId}, resumePrompt="${resumePrompt}"`);
@@ -258,7 +259,7 @@ export async function runCodex(options: RunCodexOptions): Promise<RunCodexResult
     return result;
   };
 
-  const { command, args } = buildCodexCommand({ workingDir, resumeSessionId, resumePrompt, model, modelReasoningEffort });
+  const { command, args } = buildCodexCommand({ workingDir, resumeSessionId, resumePrompt, model, modelReasoningEffort, override });
 
   // Debug logging
   debug(`Codex runner - prompt length: ${prompt.length}, lines: ${prompt.split('\n').length}`);

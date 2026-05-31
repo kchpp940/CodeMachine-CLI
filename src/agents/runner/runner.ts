@@ -1,4 +1,4 @@
-import type { EngineType } from '../../infra/engines/index.js';
+import type { EngineType, EngineOverrideContext } from '../../infra/engines/index.js';
 import { getEngine } from '../../infra/engines/index.js';
 import { loadAgentConfig } from './config.js';
 import { loadChainedPrompts, type ChainedPrompt } from './chained.js';
@@ -66,100 +66,48 @@ export interface ExecuteAgentOptions {
   model?: string;
 
   /**
-   * Working directory for execution
+   * Unified engine override context - set when engine is explicitly selected
+   * via CLI subcommand. When present, takes precedence over `engine`/`model`
+   * fields, and fallback to other engines is disabled.
    */
+  engineOverride?: EngineOverrideContext;
+
   workingDir: string;
 
-  /**
-   * Project root for config lookup (defaults to workingDir)
-   */
   projectRoot?: string;
 
-  /**
-   * Logger for stdout
-   */
   logger?: (chunk: string) => void;
 
-  /**
-   * Logger for stderr
-   */
   stderrLogger?: (chunk: string) => void;
 
-  /**
-   * Telemetry callback (for UI updates)
-   */
   onTelemetry?: (telemetry: ParsedTelemetry) => void;
 
-  /**
-   * Abort signal
-   */
   abortSignal?: AbortSignal;
 
-  /**
-   * Timeout in milliseconds
-   */
   timeout?: number;
 
-  /**
-   * Parent agent ID (for tracking parent-child relationships)
-   */
   parentId?: number;
 
-  /**
-   * Disable monitoring (for special cases where monitoring is not desired)
-   */
   disableMonitoring?: boolean;
 
-  /**
-   * UI manager (for registering monitoring IDs)
-   */
   ui?: AgentExecutionUI;
 
-  /**
-   * Unique agent ID for UI (for registering monitoring IDs)
-   */
   uniqueAgentId?: string;
 
-  /**
-   * Display prompt (for logging/monitoring - shows user's actual request)
-   * If not provided, uses the full execution prompt
-   */
   displayPrompt?: string;
 
-  /**
-   * Monitoring ID for resuming (skip new registration, use existing log)
-   */
   resumeMonitoringId?: number;
 
-  /**
-   * Custom prompt for resume (instead of "Continue from where you left off")
-   */
   resumePrompt?: string;
 
-  /**
-   * Session ID for resuming (direct, for when monitoringId is not available)
-   */
   resumeSessionId?: string;
 
-  /**
-   * Selected conditions for filtering conditional chained prompt paths
-   */
   selectedConditions?: string[];
 
-  /**
-   * Selected track for filtering track-specific chained prompt paths
-   */
   selectedTrack?: string;
 
-  /**
-   * Skip writing to agent's log file (caller handles logging externally)
-   */
   skipLogFile?: boolean;
 
-  /**
-   * Step-level MCP config (merged with agent config for tool filtering)
-   * Step config overrides agent config on a per-server basis.
-   */
   stepMCPConfig?: MCPConfig;
 }
 
@@ -198,11 +146,23 @@ export async function executeAgent(
   prompt: string,
   options: ExecuteAgentOptions,
 ): Promise<AgentExecutionOutput> {
-  const { workingDir, projectRoot, engine: engineOverride, model: modelOverride, logger, stderrLogger, onTelemetry, abortSignal, timeout, parentId, disableMonitoring, ui, uniqueAgentId, displayPrompt, resumeMonitoringId, resumePrompt, resumeSessionId: resumeSessionIdOption, selectedConditions, selectedTrack } = options;
+  const { workingDir, projectRoot, engine: engineOption, model: modelOption, engineOverride: engineOverrideCtx, logger, stderrLogger, onTelemetry, abortSignal, timeout, parentId, disableMonitoring, ui, uniqueAgentId, displayPrompt, resumeMonitoringId, resumePrompt, resumeSessionId: resumeSessionIdOption, selectedConditions, selectedTrack } = options;
+
+  const engineOverrideActive = !!engineOverrideCtx;
+  let engine: EngineType | undefined;
+  let model: string | undefined;
+
+  if (engineOverrideCtx) {
+    engine = engineOverrideCtx.engineId;
+    model = engineOverrideCtx.model;
+  } else {
+    engine = engineOption;
+    model = modelOption;
+  }
 
   debug(`[AgentRunner] executeAgent called: agentId=%s promptLength=%d`, agentId, prompt.length);
-  debug(`[AgentRunner] Options: workingDir=%s engineOverride=%s modelOverride=%s parentId=%s`,
-    workingDir, engineOverride ?? '(none)', modelOverride ?? '(none)', parentId ?? '(none)');
+  debug(`[AgentRunner] Options: workingDir=%s engine=%s model=%s parentId=%s engineOverrideActive=%s`,
+    workingDir, engine ?? '(none)', model ?? '(none)', parentId ?? '(none)', engineOverrideActive);
   debug(`[AgentRunner] Resume options: resumeMonitoringId=%s resumeSessionId=%s resumePrompt=%s`,
     resumeMonitoringId ?? '(none)', resumeSessionIdOption ?? '(none)', resumePrompt ? resumePrompt.slice(0, 50) + '...' : '(none)');
 
@@ -229,29 +189,26 @@ export async function executeAgent(
   const { registry } = await import('../../infra/engines/index.js');
   let engineType: EngineType;
 
-  if (engineOverride) {
-    engineType = engineOverride;
+  if (engine) {
+    engineType = engine;
   } else if (agentConfig.engine) {
     engineType = agentConfig.engine;
   } else {
-    // Fallback: find first authenticated engine by order (WITH CACHING - critical for subagents)
     const engines = registry.getAll();
     let foundEngine = null;
 
-    for (const engine of engines) {
-      // Use cached auth check to avoid 10-30 second delays per subagent
+    for (const eng of engines) {
       const isAuth = await authCache.isAuthenticated(
-        engine.metadata.id,
-        () => engine.auth.isAuthenticated()
+        eng.metadata.id,
+        () => eng.auth.isAuthenticated()
       );
       if (isAuth) {
-        foundEngine = engine;
+        foundEngine = eng;
         break;
       }
     }
 
     if (!foundEngine) {
-      // If no authenticated engine, use default (first by order)
       foundEngine = registry.getDefault();
     }
 
@@ -271,7 +228,22 @@ export async function executeAgent(
     : false;
 
   if (!isAuthed) {
-    // Try to find a fallback engine
+    if (engineOverrideActive) {
+      const engineName = selectedEngine?.metadata.name ?? engineType;
+      const installCmd = selectedEngine?.metadata.installCommand ?? '';
+      console.error(`\n${engineName} is not authenticated.`);
+      console.error(`\nTo authenticate, run:\n`);
+      console.error(`  codemachine auth login\n`);
+      if (installCmd) {
+        console.error(`If not installed, install it first:\n`);
+        console.error(`  ${installCmd}\n`);
+      }
+      throw new Error(
+        `${engineName} was explicitly selected but is not authenticated. ` +
+        `Falling back to another engine is disabled for explicit engine overrides.`
+      );
+    }
+
     const engines = registry.getAll();
     let fallbackEngine = null;
 
@@ -288,7 +260,6 @@ export async function executeAgent(
       }
     }
 
-    // If none authenticated, fall back to registry default (may still work - e.g., opencode only needs CLI installed)
     if (!fallbackEngine) {
       fallbackEngine = registry.getDefault() ?? null;
     }
@@ -299,7 +270,6 @@ export async function executeAgent(
       engineType = fallbackEngine.metadata.id;
       didFallback = true;
     } else {
-      // No fallback available - throw with helpful message
       const engineName = selectedEngine?.metadata.name ?? engineType;
       console.error(`\n${engineName} authentication required`);
       console.error(`\nRun the following command to authenticate:\n`);
@@ -330,9 +300,14 @@ export async function executeAgent(
     throw new Error(`Engine not found: ${engineType}`);
   }
 
-  // Model resolution: CLI override > agent config (legacy) > engine default
-  // When falling back to a different engine, ignore agent's model config (it's for the original engine)
-  const model = modelOverride ?? (didFallback ? undefined : (agentConfig.model as string | undefined)) ?? engineModule.metadata.defaultModel;
+  // Model resolution:
+  // - engineOverride active (run subcommand): override.model or engine default ONLY
+  //   Never reads agentConfig.model or modelOption — they belong to a different engine path
+  // - No override (workflow/step): modelOption > agentConfig > engine default
+  // - Fallback to different engine: ignore agentConfig.model (it's for the original engine)
+  const finalModel = engineOverrideActive
+    ? (model ?? engineModule.metadata.defaultModel)
+    : (model ?? (didFallback ? undefined : (agentConfig.model as string | undefined)) ?? engineModule.metadata.defaultModel);
   const modelReasoningEffort = (agentConfig.modelReasoningEffort as 'low' | 'medium' | 'high' | undefined) ?? engineModule.metadata.defaultModelReasoningEffort;
 
   // Initialize monitoring with engine/model info (unless explicitly disabled)
@@ -375,11 +350,11 @@ export async function executeAgent(
       debug(`[AgentRunner] NEW: Registering new monitoring entry for agentId=%s`, agentId);
       monitoringAgentId = await monitor.register({
         name: agentId,
-        prompt: promptForDisplay, // This gets truncated in monitor for memory efficiency
+        prompt: promptForDisplay,
         parentId,
         engine: engineType,
         engineProvider: engineType,
-        modelName: model,
+        modelName: finalModel,
       });
       debug(`[AgentRunner] NEW: Registered with monitoringId=%d`, monitoringAgentId);
 
@@ -402,20 +377,21 @@ export async function executeAgent(
 
   // Get engine and execute
   // NOTE: Prompt is already complete - no template loading or building here
-  const engine = getEngine(engineType);
+  const engineInstance = getEngine(engineType);
   debug(`[AgentRunner] Starting engine execution: engine=%s model=%s resumeSessionId=%s`,
-    engineType, model, resumeSessionId ?? '(new session)');
+    engineType, finalModel, resumeSessionId ?? '(new session)');
 
   let totalStdout = '';
 
   try {
-    const result = await engine.run({
-      prompt, // Already complete and ready to use
+    const result = await engineInstance.run({
+      prompt,
       workingDir,
       resumeSessionId,
       resumePrompt: resumeSessionId ? (resumePrompt || STEP_RESUME_DEFAULT) : undefined,
-      model,
+      model: finalModel,
       modelReasoningEffort,
+      override: engineOverrideCtx,
       env: {
         ...process.env,
         // Pass parent agent ID to child processes (for orchestration context)

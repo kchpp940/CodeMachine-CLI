@@ -1,9 +1,13 @@
+import { metadata } from '../metadata.js';
+import type { EngineOverrideContext } from '../../../core/types.js';
+
 export interface CodexCommandOptions {
   workingDir: string;
   resumeSessionId?: string;
   resumePrompt?: string;
   model?: string;
   modelReasoningEffort?: 'low' | 'medium' | 'high';
+  override?: EngineOverrideContext;
 }
 
 export interface CodexCommand {
@@ -12,9 +16,16 @@ export interface CodexCommand {
 }
 
 export function buildCodexCommand(options: CodexCommandOptions): CodexCommand {
-  const { workingDir, resumeSessionId, resumePrompt, model, modelReasoningEffort } = options;
+  const { workingDir, resumeSessionId, resumePrompt, model, modelReasoningEffort, override } = options;
 
-  // Base args shared by both normal exec and resume
+  if (override && override.engineId !== metadata.id) {
+    throw new Error(
+      `Engine override mismatch: buildCodexCommand called for engine '${metadata.id}' ` +
+      `but override specifies engine '${override.engineId}'. ` +
+      `This is an internal error - the wrong engine command builder was called.`
+    );
+  }
+
   const args = [
     'exec',
     '--json',
@@ -26,23 +37,20 @@ export function buildCodexCommand(options: CodexCommandOptions): CodexCommand {
     workingDir,
   ];
 
-  // Add model if specified (only for new exec, not resume)
-  if (model && !resumeSessionId) {
-    args.push('--model', model);
+  const finalModel = override?.model ?? model;
+  if (finalModel && !resumeSessionId) {
+    args.push('--model', finalModel);
   }
 
-  // Add reasoning effort if specified
   if (modelReasoningEffort) {
     args.push('--config', `model_reasoning_effort="${modelReasoningEffort}"`);
   }
 
   if (resumeSessionId) {
-    // Resume: add resume subcommand with session ID and combined prompt
     args.push('resume', resumeSessionId, resumePrompt!);
   } else {
-    // Normal exec: read prompt from stdin
     args.push('-');
   }
 
-  return { command: 'codex', args };
+  return { command: metadata.cliBinary, args };
 }

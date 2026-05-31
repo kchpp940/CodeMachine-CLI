@@ -8,6 +8,7 @@ import { expandHomeDir } from '../../../../../shared/utils/index.js';
 import { ENV } from '../config.js';
 import { formatThinking, formatCommand, formatResult, formatStatus } from '../../../../../shared/formatters/outputMarkers.js';
 import { debug } from '../../../../../shared/logging/logger.js';
+import type { EngineOverrideContext } from '../../../core/types.js';
 
 export interface RunCursorOptions {
   prompt: string;
@@ -20,7 +21,8 @@ export interface RunCursorOptions {
   onErrorData?: (chunk: string) => void;
   onSessionId?: (sessionId: string) => void;
   abortSignal?: AbortSignal;
-  timeout?: number; // Timeout in milliseconds (default: 1800000ms = 30 minutes)
+  timeout?: number;
+  override?: EngineOverrideContext;
 }
 
 export interface RunCursorResult {
@@ -174,7 +176,7 @@ function formatStreamJsonLine(line: string): string[] | null {
 }
 
 export async function runCursor(options: RunCursorOptions): Promise<RunCursorResult> {
-  const { prompt, workingDir, resumeSessionId, resumePrompt, model, env, onData, onErrorData, onSessionId, abortSignal, timeout = 1800000 } = options;
+  const { prompt, workingDir, resumeSessionId, resumePrompt, model, env, onData, onErrorData, onSessionId, abortSignal, timeout = 1800000, override } = options;
 
   if (!prompt) {
     throw new Error('runCursor requires a prompt.');
@@ -220,7 +222,8 @@ export async function runCursor(options: RunCursorOptions): Promise<RunCursorRes
     workingDir,
     resumeSessionId,
     model,
-    cursorConfigDir
+    cursorConfigDir,
+    override,
   });
 
   // Debug logging

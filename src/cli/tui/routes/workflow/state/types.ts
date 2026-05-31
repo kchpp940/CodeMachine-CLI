@@ -30,7 +30,7 @@ export interface AgentState {
   telemetry: AgentTelemetry
   startTime: number
   endTime?: number
-  duration?: number // Final duration in seconds (set when agent completes)
+  duration?: number
   error?: string
   toolCount: number
   thinkingCount: number
@@ -38,8 +38,8 @@ export interface AgentState {
   loopReason?: string
   stepIndex?: number
   totalSteps?: number
-  orderIndex?: number // Overall step position for timeline ordering
-  monitoringId?: number // Maps to AgentMonitorService registry ID for log file access
+  orderIndex?: number
+  monitoringId?: number
 }
 
 export interface SubAgentState extends AgentState {

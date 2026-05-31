@@ -28,7 +28,7 @@ export interface AgentInfo {
   stepIndex: number;
   totalSteps: number;
   status: AgentStatus;
-  orderIndex: number; // Overall step position for timeline ordering
+  orderIndex: number;
 }
 
 /**

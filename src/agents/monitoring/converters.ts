@@ -20,14 +20,11 @@ export function agentRecordToSubAgentState(
 
   return {
     id: agent.id.toString(),
-    // Include monitoringId for log streaming - maps to registry for log access
     monitoringId: agent.id,
-    // Use override UI parent ID if provided (for flattening nested hierarchies)
-    // Otherwise use the monitoring parentId
     parentId: uiParentId ?? agent.parentId.toString(),
     name: agent.name,
-    // Use agent's actual engine if available, otherwise fall back to provided engine
     engine: agent.engine ?? fallbackEngine ?? 'unknown',
+    model: agent.modelName,
     status: uiStatus,
     startTime: new Date(agent.startTime).getTime(),
     endTime: agent.endTime ? new Date(agent.endTime).getTime() : undefined,
@@ -37,10 +34,10 @@ export function agentRecordToSubAgentState(
       tokensOut: agent.telemetry?.tokensOut ?? 0,
       cached: agent.telemetry?.cached,
       cost: agent.telemetry?.cost,
-      duration: agent.duration ? agent.duration / 1000 : undefined, // Convert ms to seconds
+      duration: agent.duration ? agent.duration / 1000 : undefined,
     },
-    toolCount: 0, // Not tracked in AgentRecord
-    thinkingCount: 0, // Not tracked in AgentRecord
+    toolCount: 0,
+    thinkingCount: 0,
   };
 }
 

@@ -61,7 +61,6 @@ export function MainAgentNode(props: MainAgentNodeProps) {
 
   return (
     <box flexDirection="column" paddingLeft={1} paddingRight={1}>
-      {/* Main line - use wrapMode="none" and overflow="hidden" to prevent text wrapping */}
       <box flexDirection="row" overflow="hidden">
         <text wrapMode="none" fg={themeCtx.theme.text}>{selectionPrefix()}</text>
         <Show when={props.agent.status === "running" || props.agent.status === "delegated"} fallback={

@@ -8,7 +8,7 @@ import { metadata } from '../metadata.js';
 import { expandHomeDir } from '../../../../../shared/utils/index.js';
 import { ENV } from '../config.js';
 import { debug } from '../../../../../shared/logging/logger.js';
-import type { ParsedTelemetry } from '../../../core/types.js';
+import type { ParsedTelemetry, EngineOverrideContext } from '../../../core/types.js';
 import {
   formatThinking,
   formatCommand,
@@ -81,7 +81,8 @@ export interface RunClaudeOptions {
   onTelemetry?: (telemetry: ParsedTelemetry) => void;
   onSessionId?: (sessionId: string) => void;
   abortSignal?: AbortSignal;
-  timeout?: number; // Timeout in milliseconds (default: 1800000ms = 30 minutes)
+  timeout?: number;
+  override?: EngineOverrideContext;
 }
 
 export interface RunClaudeResult {
@@ -171,7 +172,7 @@ function formatStreamJsonLine(line: string): string[] | null {
 }
 
 export async function runClaude(options: RunClaudeOptions): Promise<RunClaudeResult> {
-  const { prompt, workingDir, resumeSessionId, resumePrompt, model, env, onData, onErrorData, onTelemetry, onSessionId, abortSignal, timeout = 1800000 } = options;
+  const { prompt, workingDir, resumeSessionId, resumePrompt, model, env, onData, onErrorData, onTelemetry, onSessionId, abortSignal, timeout = 1800000, override } = options;
 
   if (!prompt) {
     throw new Error('runClaude requires a prompt.');
@@ -230,7 +231,7 @@ export async function runClaude(options: RunClaudeOptions): Promise<RunClaudeRes
     return result;
   };
 
-  const { command, args } = buildClaudeExecCommand({ workingDir, resumeSessionId, model });
+  const { command, args } = buildClaudeExecCommand({ workingDir, resumeSessionId, model, override });
 
   // Track state
   let capturedError: string | null = null;

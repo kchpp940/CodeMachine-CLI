@@ -133,12 +133,11 @@ export class WorkflowEventEmitter {
     totalSteps: number,
     orderIndex: number,
     status: AgentStatus = 'pending',
-    model?: string
+    model?: string,
   ): void {
     debug('[Emitter] agent:added id=%s name=%s engine=%s step=%d/%d order=%d status=%s',
       agentId, name, engine, stepIndex, totalSteps, orderIndex, status);
 
-    // Track step info for this agent
     this.agentStepMap.set(agentId, { stepIndex, totalSteps });
 
     const agent: AgentInfo = {

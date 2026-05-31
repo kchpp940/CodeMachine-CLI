@@ -9,17 +9,17 @@ import { resolvePlaceholderPath, loadPlaceholdersConfig } from '../../shared/pro
 import * as logger from '../../shared/logging/logger.js';
 import chalk from 'chalk';
 
+import type { EngineOverrideContext } from '../../infra/engines/index.js';
+
 export interface CoordinationExecutorOptions {
-  /** Working directory for agent execution */
   workingDir: string;
 
-  /** Parent agent ID (the coordination session) - optional for standalone coordination */
+  engineOverride?: EngineOverrideContext;
+
   parentId?: number;
 
-  /** Optional logger for agent output */
   logger?: (agentName: string, chunk: string) => void;
 
-  /** Suppress all console output (for MCP/headless execution) */
   silent?: boolean;
 }
 
@@ -142,10 +142,11 @@ export class CoordinationExecutor {
 
       const result = await executeAgent(command.name, compositePrompt, {
         workingDir: this.options.workingDir,
+        engineOverride: this.options.engineOverride,
         parentId: this.options.parentId,
-        displayPrompt: command.prompt, // Show user's actual request in logs, not full composite
+        displayPrompt: command.prompt,
         logger: suppressOutput
-          ? () => {} // Silent logger when tail is active
+          ? () => {}
           : this.options.logger
             ? (chunk) => this.options.logger!(command.name, chunk)
             : undefined,

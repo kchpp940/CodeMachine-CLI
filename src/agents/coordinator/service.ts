@@ -5,14 +5,15 @@ import { AgentMonitorService } from '../monitoring/index.js';
 import * as logger from '../../shared/logging/logger.js';
 import chalk from 'chalk';
 
+import type { EngineOverrideContext } from '../../infra/engines/index.js';
+
 export interface CoordinatorOptions {
-  /** Working directory for agent execution */
   workingDir: string;
 
-  /** Optional logger for agent output */
+  engineOverride?: EngineOverrideContext;
+
   logger?: (agentName: string, chunk: string) => void;
 
-  /** Suppress all console output (for MCP/headless execution) */
   silent?: boolean;
 }
 
@@ -95,10 +96,10 @@ export class CoordinatorService {
       log(chalk.dim(`Coordination running as standalone session\n`));
     }
 
-    // Create executor - pass parent ID directly (no coordination session wrapper)
     const executor = new CoordinationExecutor({
       workingDir: options.workingDir,
-      parentId: contextParentId, // Agents register directly under workflow agent
+      engineOverride: options.engineOverride,
+      parentId: contextParentId,
       logger: options.logger,
       silent: options.silent,
     });
