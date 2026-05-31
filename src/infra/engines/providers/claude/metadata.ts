@@ -8,12 +8,6 @@ export const metadata: EngineMetadata = {
   cliBinary: 'claude',
   installCommand: 'npm install -g @anthropic-ai/claude-code',
   defaultModel: 'opus',
-  capabilities: {
-    supportsReasoningEffort: false,
-    supportsResume: true,
-    supportsModelOverride: true,
-    supportedModels: ['opus', 'sonnet', 'haiku'],
-  },
   order: 2,
   experimental: true,
 };

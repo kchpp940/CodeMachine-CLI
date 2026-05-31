@@ -8,11 +8,6 @@ export const metadata: EngineMetadata = {
   cliBinary: 'vibe',
   installCommand: 'uv tool install mistral-vibe',
   defaultModel: 'devstral-2',
-  capabilities: {
-    supportsReasoningEffort: false,
-    supportsResume: false,
-    supportsModelOverride: true,
-  },
   order: 5,
   experimental: true,
 };

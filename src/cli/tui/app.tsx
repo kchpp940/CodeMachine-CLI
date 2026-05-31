@@ -29,11 +29,6 @@ export type InitialToast = {
   duration?: number
 }
 
-export type TUILaunchOptions = {
-  yes?: boolean;
-  skipPreview?: boolean;
-}
-
 /**
  * Root component with all providers
  */
@@ -64,17 +59,11 @@ function Root(props: { mode: "dark" | "light"; initialToast?: InitialToast; onEx
 export async function startTUI(
   skipBackgroundDetection: boolean = false,
   knownMode?: "dark" | "light",
-  initialToast?: InitialToast,
-  launchOptions?: TUILaunchOptions
+  initialToast?: InitialToast
 ): Promise<void> {
   const cliTracer = getCliTracer()
   otel_debug(LOGGER_NAMES.TUI, '[TUI] startTUI function entered', [])
   otel_debug(LOGGER_NAMES.TUI, '[TUI] skipBackgroundDetection=%s, knownMode=%s', [skipBackgroundDetection, knownMode])
-
-  if (launchOptions) {
-    // @ts-expect-error - global options for workflow
-    globalThis.__tuiLaunchOptions = launchOptions
-  }
 
   // Priority: 1. Saved theme from KV, 2. Known mode, 3. Auto-detect
   const mode = await withSpan(cliTracer, 'cli.tui.theme_detect', async (themeSpan) => {

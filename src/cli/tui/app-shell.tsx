@@ -5,7 +5,7 @@
  * Main application with routing and layout.
  */
 
-import { Match, Show, Switch, createSignal, createEffect } from "solid-js"
+import { Match, Show, Switch, For, createSignal, createEffect } from "solid-js"
 import { useTerminalDimensions, useKeyboard, useRenderer } from "@opentui/solid"
 import { TextAttributes } from "@opentui/core"
 import { useKV } from "@tui/shared/context/kv"
@@ -17,28 +17,178 @@ import { useUpdateNotifier } from "@tui/shared/context/update-notifier"
 import { Home } from "@tui/routes/home"
 import { Workflow } from "@tui/routes/workflow"
 import { Onboard } from "@tui/routes/onboard"
-import { DryPreview } from "@tui/routes/preview"
 import { homedir } from "os"
-import { WorkflowEventBus, OnboardingService } from "../../workflows/events/index.js"
-import { debug, setDebugLogFile, otel_debug } from "../../shared/logging/logger.js"
+import { WorkflowEventBus } from "../../workflows/events/index.js"
+import { debug, otel_debug } from "../../shared/logging/logger.js"
 import { LOGGER_NAMES } from "../../shared/logging/otel-logger.js"
 import { MonitoringCleanup } from "../../agents/monitoring/index.js"
-import path from "path"
 import { VERSION } from "../../runtime/version.js"
-import { setSelectedTrack, setSelectedConditions, setProjectName } from "../../shared/workflows/index.js"
-import { checkOnboardingRequired, needsOnboarding, dryPreview } from "../../workflows/preflight.js"
-import type { DryPreviewResult } from "../../workflows/preflight/dry-preview.js"
+import { getWorkflowExecutionGateway } from "../../workflows/gateway/index.js"
+import type { GatewayEvent, PreviewResult, PreviewBlockingIssue, PreviewAgent, PreviewChain, PreviewImport } from "../../workflows/gateway/types.js"
 import type { TracksConfig, ConditionGroup } from "../../workflows/templates/types"
-import type { InitialToast, TUILaunchOptions } from "./app"
+import type { InitialToast } from "./app"
 import { exitTUI } from "./exit"
 
-function getTUILaunchOptions(): TUILaunchOptions | undefined {
-  const g = globalThis as Record<string, unknown>;
-  return g.__tuiLaunchOptions as TUILaunchOptions | undefined;
+function ConfirmPreview(props: {
+  preview: PreviewResult
+  onConfirm: () => void
+  onDeny: () => void
+}) {
+  const themeCtx = useTheme()
+  const dimensions = useTerminalDimensions()
+  const [scrollOffset, setScrollOffset] = createSignal(0)
+
+  const hasErrors = () => props.preview.hasErrors
+  const errors = () => props.preview.blockingIssues.filter(i => i.type === 'error')
+  const warnings = () => props.preview.blockingIssues.filter(i => i.type === 'warning')
+  const numErrors = () => errors().length
+  const numWarnings = () => warnings().length
+
+  useKeyboard((evt) => {
+    if (evt.name === 'arrowUp') {
+      evt.preventDefault()
+      setScrollOffset(Math.max(0, scrollOffset() - 1))
+      return
+    }
+    if (evt.name === 'arrowDown') {
+      evt.preventDefault()
+      setScrollOffset(scrollOffset() + 1)
+      return
+    }
+    if (!hasErrors() && (evt.name === 'y' || evt.name === 'Y' || evt.name === 'enter')) {
+      evt.preventDefault()
+      props.onConfirm()
+      return
+    }
+    if (evt.name === 'n' || evt.name === 'N' || (evt.ctrl && evt.name === 'c')) {
+      evt.preventDefault()
+      props.onDeny()
+      return
+    }
+  })
+
+  const lines: Array<{ type: 'header' | 'subheader' | 'line' | 'empty'; text?: string; color?: string }> = []
+
+  const push = (type: 'header' | 'subheader' | 'line' | 'empty', text?: string, color?: string) => {
+    lines.push({ type, text, color })
+  }
+
+  push('header', `Workflow: ${props.preview.template.name}`)
+  push('empty')
+  push('subheader', 'Files')
+  push('line', `  Template: ${props.preview.templatePath}`, themeCtx.theme.textMuted)
+  if (props.preview.specPath) {
+    push('line', `  Spec:     ${props.preview.specPath}`, themeCtx.theme.textMuted)
+  }
+  push('empty')
+
+  if (props.preview.imports.length > 0) {
+    push('subheader', `Imports (${props.preview.imports.length})`)
+    for (const imp of props.preview.imports) {
+      push('line', `  ${imp.name}@${imp.version} (${imp.source})`, themeCtx.theme.textMuted)
+    }
+    push('empty')
+  }
+
+  if (props.preview.subAgents.length > 0) {
+    push('subheader', `Sub-agents (${props.preview.subAgents.length})`)
+    push('line', `  ${props.preview.subAgents.join(', ')}`, themeCtx.theme.textMuted)
+    push('empty')
+  }
+
+  push('subheader', `Agents (${props.preview.agents.length})`)
+  for (const agent of props.preview.agents) {
+    const tagInteractive = agent.isInteractive ? ' [interactive]' : ''
+    const tagBehavior = agent.moduleBehavior ? ` [${agent.moduleBehavior}]` : ''
+    const modelEffort = agent.modelReasoningEffort ? ` (effort:${agent.modelReasoningEffort})` : ''
+    push('line', `  ${agent.agentName}`)
+    push('line', `    engine=${agent.engine}, model=${agent.model}${modelEffort}`, themeCtx.theme.textMuted)
+    push('line', `    prompts: ${agent.promptPath.join(', ')}`, themeCtx.theme.textMuted)
+    if (agent.tracks?.length) {
+      push('line', `    tracks:  ${agent.tracks.join(', ')}`, themeCtx.theme.textMuted)
+    }
+    if (agent.conditions?.length || agent.conditionsAny?.length) {
+      const conds = [...(agent.conditions || []), ...(agent.conditionsAny || [])].join(', ')
+      push('line', `    conds:   ${conds}`, themeCtx.theme.textMuted)
+    }
+    if (tagInteractive || tagBehavior) {
+      push('line', `    ${tagInteractive}${tagBehavior}`.trim(), themeCtx.theme.textMuted)
+    }
+  }
+  push('empty')
+
+  if (props.preview.chains.length > 0) {
+    push('subheader', `Trigger Chains (${props.preview.chains.length})`)
+    for (const chain of props.preview.chains) {
+      push('line', `  ${chain.name}`, themeCtx.theme.textMuted)
+    }
+    push('empty')
+  }
+
+  if (numErrors() > 0 || numWarnings() > 0) {
+    push('subheader', `Issues (${numErrors()} errors, ${numWarnings()} warnings)`)
+    for (const issue of props.preview.blockingIssues) {
+      const prefix = issue.type === 'error' ? '  ✗ ' : '  ⚠ '
+      const color = issue.type === 'error' ? themeCtx.theme.error : themeCtx.theme.warning
+      const stepInfo = issue.agentId ? ` (${issue.agentId})` : ''
+      push('line', `${prefix}${issue.message}${stepInfo}`, color)
+    }
+    push('empty')
+  }
+
+  const maxContentHeight = () => dimensions().height - 6
+  const totalLines = lines.length
+  const visibleStart = scrollOffset()
+  const visibleEnd = Math.min(visibleStart + maxContentHeight(), totalLines)
+  const visibleLines = () => lines.slice(visibleStart, visibleEnd)
+
+  return (
+    <box flexDirection="column" width={dimensions().width} height={dimensions().height}>
+      <box flexDirection="row" justifyContent="space-between" paddingLeft={1} paddingRight={1}>
+        <text fg={themeCtx.theme.primary} attributes={TextAttributes.BOLD}> Dry Run Preview </text>
+        <Show when={hasErrors()}>
+          <text fg={themeCtx.theme.error}> BLOCKED: Fix errors before proceeding </text>
+        </Show>
+        <Show when={!hasErrors() && (numErrors() > 0 || numWarnings() > 0)}>
+          <text fg={themeCtx.theme.warning}> {numErrors()} errors, {numWarnings()} warnings </text>
+        </Show>
+        <Show when={totalLines > maxContentHeight()}>
+          <text fg={themeCtx.theme.textMuted}> ↑↓ scroll ({visibleStart + 1}-{visibleEnd}/{totalLines}) </text>
+        </Show>
+      </box>
+
+      <box flexDirection="column" paddingLeft={2} paddingRight={2} height={dimensions().height - 4}>
+        <For each={visibleLines()}>
+          {(line) => {
+            if (line.type === 'header') {
+              return <text fg={line.color || themeCtx.theme.text} attributes={TextAttributes.BOLD}>{line.text}</text>;
+            }
+            if (line.type === 'subheader') {
+              return <text fg={line.color || themeCtx.theme.primary} attributes={TextAttributes.BOLD}>{line.text}</text>;
+            }
+            if (line.type === 'line') {
+              return <text fg={line.color || themeCtx.theme.text}>{line.text}</text>;
+            }
+            return <text fg={themeCtx.theme.text}> </text>;
+          }}
+        </For>
+      </box>
+
+      <box flexDirection="row" justifyContent="center" gap={4}>
+        <Show when={hasErrors()}>
+          <text fg={themeCtx.theme.error} attributes={TextAttributes.BOLD}> Errors present — cannot proceed </text>
+        </Show>
+        <Show when={!hasErrors()}>
+          <text fg={themeCtx.theme.primary} attributes={TextAttributes.BOLD}>[Y] Run Workflow</text>
+        </Show>
+        <text fg={themeCtx.theme.textMuted}>[N] Cancel</text>
+      </box>
+    </box>
+  )
 }
 
 // Module-level view state for post-processing effects
-export let currentView: "home" | "onboard" | "preview" | "workflow" = "home"
+export let currentView: "home" | "onboard" | "confirm" | "workflow" = "home"
 
 /**
  * Get the clipboard copy method based on OS (lazy loaded)
@@ -140,201 +290,90 @@ export function App(props: { initialToast?: InitialToast }) {
 
   const [ctrlCPressed, setCtrlCPressed] = createSignal(false)
   let ctrlCTimeout: NodeJS.Timeout | null = null
-  const [view, setView] = createSignal<"home" | "onboard" | "preview" | "workflow">("home")
+  const [view, setView] = createSignal<"home" | "onboard" | "confirm" | "workflow">("home")
   const [workflowEventBus, setWorkflowEventBus] = createSignal<WorkflowEventBus | null>(null)
-  const [dryPreviewResult, setDryPreviewResult] = createSignal<DryPreviewResult | null>(null)
   const [templateTracks, setTemplateTracks] = createSignal<TracksConfig | null>(null)
   const [templateConditionGroups, setTemplateConditionGroups] = createSignal<ConditionGroup[] | null>(null)
   const [initialProjectName, setInitialProjectName] = createSignal<string | null>(null)
-  const [onboardingService, setOnboardingService] = createSignal<OnboardingService | null>(null)
+  const [onboardingService, setOnboardingService] = createSignal<any>(null)
   const [onboardingEventBus, setOnboardingEventBus] = createSignal<WorkflowEventBus | null>(null)
+  const [confirmPreview, setConfirmPreview] = createSignal<PreviewResult | null>(null)
 
-  let pendingWorkflowStart: (() => void) | null = null
+  const gateway = getWorkflowExecutionGateway()
 
   const handleAdapterReady = () => {
-    if (pendingWorkflowStart) {
-      pendingWorkflowStart()
-      pendingWorkflowStart = null
-    }
+    debug('[AppShell] adapter ready, proceeding with execution')
+    gateway.proceedWithExecution()
   }
 
-  const handleStartWorkflow = async () => {
-    otel_debug(LOGGER_NAMES.TUI, '[AppShell] handleStartWorkflow called', [])
-    const cwd = process.env.CODEMACHINE_CWD || process.cwd()
-    const cmRoot = path.join(cwd, '.codemachine')
-    otel_debug(LOGGER_NAMES.TUI, '[AppShell] cwd=%s, cmRoot=%s', [cwd, cmRoot])
+  const handleConfirmWorkflow = () => {
+    debug('[AppShell] user confirmed workflow execution')
+    gateway.confirmExecution()
+  }
 
-    // Initialize debug log file early (before onboarding) so all logs are captured
-    const rawLogLevel = (process.env.LOG_LEVEL || '').trim().toLowerCase()
-    const debugFlag = (process.env.DEBUG || '').trim().toLowerCase()
-    const debugEnabled = rawLogLevel === 'debug' || (debugFlag !== '' && debugFlag !== '0' && debugFlag !== 'false')
-    if (debugEnabled) {
-      const debugLogPath = path.join(cwd, '.codemachine', 'logs', 'workflow-debug.log')
-      otel_debug(LOGGER_NAMES.TUI, '[AppShell] Switching to workflow debug log: %s', [debugLogPath])
-      setDebugLogFile(debugLogPath)
-    }
+  const handleDenyWorkflow = () => {
+    debug('[AppShell] user denied workflow execution')
+    gateway.denyExecution()
+    currentView = "home"
+    setView("home")
+  }
 
-    // Run pre-flight checks
-    try {
-      const onboardingNeeds = await checkOnboardingRequired({ cwd })
-      const { template } = onboardingNeeds
-
-      // If any onboarding is needed, show onboard view
-      if (needsOnboarding(onboardingNeeds)) {
-        debug('[AppShell] Starting onboarding flow')
-
-        const hasTracks = template.tracks && Object.keys(template.tracks.options).length > 0
-        const hasConditionGroups = template.conditionGroups && template.conditionGroups.length > 0
-
-        // Store config for Onboard component
+  gateway.onEvent((event: GatewayEvent) => {
+    switch (event.type) {
+      case 'onboarding:required': {
+        const { template } = event
+        const hasTracks = !!(template.tracks && Object.keys(template.tracks.options).length > 0)
+        const hasConditionGroups = !!(template.conditionGroups && template.conditionGroups.length > 0)
         if (hasTracks) setTemplateTracks(template.tracks!)
         if (hasConditionGroups) setTemplateConditionGroups(template.conditionGroups!)
         setInitialProjectName(null)
-
-        // Create event bus and service for onboarding
-        const eventBus = new WorkflowEventBus()
-        setOnboardingEventBus(eventBus)
-
-        const service = new OnboardingService(eventBus, {
-          tracks: hasTracks ? template.tracks : undefined,
-          conditionGroups: hasConditionGroups ? template.conditionGroups : undefined,
-          initialProjectName: onboardingNeeds.needsProjectName ? undefined : undefined,
-        })
-        setOnboardingService(service)
-
-        // Subscribe to completion event
-        eventBus.on('onboard:completed', (event) => {
-          debug('[AppShell] onboard:completed received result=%o', event.result)
-          handleOnboardComplete(event.result)
-        })
-
-        // Subscribe to cancel event
-        eventBus.on('onboard:cancelled', () => {
-          debug('[AppShell] onboard:cancelled received')
-          handleOnboardCancel()
-        })
-
+        setOnboardingEventBus(gateway.onboardingEventBus)
+        setOnboardingService(gateway.onboardingService)
+        if (gateway.onboardingEventBus) {
+          gateway.onboardingEventBus.on('onboard:completed', (e: any) => {
+            debug('[AppShell] onboard:completed result=%o', e.result)
+            gateway.completeOnboarding(e.result)
+          })
+          gateway.onboardingEventBus.on('onboard:cancelled', () => {
+            debug('[AppShell] onboard:cancelled')
+            gateway.cancelOnboarding()
+          })
+        }
         currentView = "onboard"
         setView("onboard")
-        return
+        break
       }
-    } catch (error) {
-      // If pre-flight check fails, proceed to workflow anyway
-      otel_debug(LOGGER_NAMES.TUI, '[AppShell] Failed pre-flight check: %s', [error])
-      console.error("Failed pre-flight check:", error)
-    }
-
-    // No onboarding needed - run dry preview
-    otel_debug(LOGGER_NAMES.TUI, '[AppShell] Running dry preview', [])
-    await showDryPreview({ cwd })
-  }
-
-  const showDryPreview = async (options: { cwd: string }) => {
-    try {
-      const result = await dryPreview({ cwd: options.cwd })
-      const launchOpts = getTUILaunchOptions()
-      setDryPreviewResult(result)
-
-      if (launchOpts?.skipPreview) {
-        otel_debug(LOGGER_NAMES.TUI, '[AppShell] --no-preview flag provided, skipping preview confirmation', [])
-        if (result.valid) {
-          const confirmed = { ...result, confirmed: true as const, confirmedBy: 'flag' as const }
-          startWorkflowExecution(confirmed)
-        } else {
-          toast.show({ variant: 'error', message: 'Dry preview has errors', duration: 5000 })
-          currentView = 'home'
-          setView('home')
-        }
-        return
+      case 'onboarding:cancelled': {
+        currentView = "home"
+        setView("home")
+        break
       }
-
-      if (launchOpts?.yes && result.valid) {
-        otel_debug(LOGGER_NAMES.TUI, '[AppShell] --yes flag provided, auto-confirming valid preview', [])
-        const confirmed = { ...result, confirmed: true as const, confirmedBy: 'flag' as const }
-        startWorkflowExecution(confirmed)
-        return
+      case 'confirm:required': {
+        setConfirmPreview(event.preview)
+        currentView = "confirm"
+        setView("confirm")
+        break
       }
-
-      currentView = 'preview'
-      setView('preview')
-    } catch (error) {
-      otel_debug(LOGGER_NAMES.TUI, '[AppShell] Dry preview failed: %s', [error])
-      toast.show({ variant: 'error', message: `Dry preview failed: ${error instanceof Error ? error.message : String(error)}`, duration: 5000 })
-      currentView = 'home'
-      setView('home')
+      case 'execute:ready': {
+        setConfirmPreview(null)
+        setWorkflowEventBus(event.eventBus)
+        currentView = "workflow"
+        setView("workflow")
+        break
+      }
+      case 'execute:failed': {
+        debug('[AppShell] execution failed: %s', event.error.message)
+        break
+      }
+      default:
+        break
     }
-  }
+  })
 
-  const handleDryPreviewConfirm = () => {
-    const result = dryPreviewResult()
-    otel_debug(LOGGER_NAMES.TUI, '[AppShell] Dry preview confirmed, starting workflow', [])
-    if (result && result.valid) {
-      const confirmed = { ...result, confirmed: true as const, confirmedBy: 'user' as const }
-      startWorkflowExecution(confirmed)
-    } else {
-      toast.show({ variant: "error", message: "Cannot start: dry preview has errors", duration: 5000 })
-    }
-  }
-
-  const handleDryPreviewCancel = () => {
-    otel_debug(LOGGER_NAMES.TUI, '[AppShell] Dry preview cancelled', [])
-    currentView = "home"
-    setView("home")
-  }
-
-  const startWorkflowExecution = (confirmedPreview?: { confirmed: true; valid: boolean; templateName: string; templatePath: string; confirmedBy: string; [key: string]: unknown }) => {
-    otel_debug(LOGGER_NAMES.TUI, '[AppShell] startWorkflowExecution called', [])
-    const eventBus = new WorkflowEventBus()
-    setWorkflowEventBus(eventBus)
-    // @ts-expect-error - global export for workflow connection
-    globalThis.__workflowEventBus = eventBus
-
+  const handleStartWorkflow = () => {
+    otel_debug(LOGGER_NAMES.TUI, '[AppShell] handleStartWorkflow called', [])
     const cwd = process.env.CODEMACHINE_CWD || process.cwd()
-    const specPath = path.join(cwd, '.codemachine', 'inputs', 'specifications.md')
-    otel_debug(LOGGER_NAMES.TUI, '[AppShell] specPath=%s', [specPath])
-
-    pendingWorkflowStart = () => {
-      otel_debug(LOGGER_NAMES.TUI, '[AppShell] Importing and running workflow', [])
-      import("../../workflows/run.js").then(({ runWorkflow }) => {
-        runWorkflow({
-          cwd,
-          ...(confirmedPreview ? { previewConfirmed: confirmedPreview } : {}),
-        }).catch((error) => {
-          // Error is already handled by workflow:error event (shows ErrorModal)
-          // Just log it here for debugging - no need to show toast
-          const errorMsg = error instanceof Error ? error.message : String(error)
-          otel_debug(LOGGER_NAMES.TUI, '[AppShell] Workflow error (handled by ErrorModal): %s', [errorMsg.slice(0, 200)])
-        })
-      })
-    }
-
-    currentView = "workflow"
-    setView("workflow")
-    otel_debug(LOGGER_NAMES.TUI, '[AppShell] View set to workflow', [])
-  }
-
-  const handleOnboardComplete = async (result: { projectName?: string; trackId?: string; conditions?: string[] }) => {
-    const cwd = process.env.CODEMACHINE_CWD || process.cwd()
-    const cmRoot = path.join(cwd, '.codemachine')
-
-    if (result.projectName) {
-      await setProjectName(cmRoot, result.projectName)
-    }
-
-    if (result.trackId) {
-      await setSelectedTrack(cmRoot, result.trackId)
-    }
-
-    if (result.conditions !== undefined) {
-      await setSelectedConditions(cmRoot, result.conditions)
-    }
-
-    await showDryPreview({ cwd })
-  }
-
-  const handleOnboardCancel = () => {
-    currentView = "home"
-    setView("home")
+    gateway.submit({ type: 'start-tui', cwd })
   }
 
   createEffect(() => {
@@ -427,17 +466,17 @@ export function App(props: { initialToast?: InitialToast }) {
               tracks={templateTracks() ?? undefined}
               conditionGroups={templateConditionGroups() ?? undefined}
               initialProjectName={initialProjectName()}
-              onComplete={handleOnboardComplete}
-              onCancel={handleOnboardCancel}
+              onComplete={(result) => gateway.completeOnboarding(result)}
+              onCancel={() => gateway.cancelOnboarding()}
               eventBus={onboardingEventBus() ?? undefined}
               service={onboardingService() ?? undefined}
             />
           </Match>
-          <Match when={view() === "preview" && dryPreviewResult()}>
-            <DryPreview
-              result={dryPreviewResult()!}
-              onConfirm={handleDryPreviewConfirm}
-              onCancel={handleDryPreviewCancel}
+          <Match when={view() === "confirm"}>
+            <ConfirmPreview
+              preview={confirmPreview()!}
+              onConfirm={handleConfirmWorkflow}
+              onDeny={handleDenyWorkflow}
             />
           </Match>
           <Match when={view() === "workflow"}>

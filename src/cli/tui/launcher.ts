@@ -29,22 +29,15 @@ if (isDev) {
   otel_debug(LOGGER_NAMES.TUI, '[Launcher] OpenTUI preload loaded', []);
 }
 
-import type { TUILaunchOptions } from './app.js';
-
 // Dynamic import ensures app.js is loaded AFTER preload is registered (in dev)
-export async function startTUI(
-  skipBackgroundDetection: boolean = false,
-  knownMode?: 'dark' | 'light',
-  initialToast?: any,
-  launchOptions?: TUILaunchOptions,
-) {
+export async function startTUI() {
   otel_debug(LOGGER_NAMES.TUI, '[Launcher] startTUI() called', []);
   otel_debug(LOGGER_NAMES.TUI, '[Launcher] Importing TUI app module', []);
   try {
-    const app = await import('./app.js');
+    const app = await import("./app.js");
     otel_debug(LOGGER_NAMES.TUI, '[Launcher] app.js imported successfully', []);
     otel_debug(LOGGER_NAMES.TUI, '[Launcher] Calling app.startTUI()', []);
-    const result = await app.startTUI(skipBackgroundDetection, knownMode, initialToast, launchOptions);
+    const result = await app.startTUI();
     otel_debug(LOGGER_NAMES.TUI, '[Launcher] app.startTUI() returned', []);
     return result;
   } catch (err) {
