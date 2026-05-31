@@ -13,7 +13,7 @@ export type { StepData, QueuedPrompt, ResumeInfo, TemplateTracking, ControllerCo
 export { StepLifecyclePhase, ResumeDecision } from './types.js';
 
 // Lifecycle utilities
-export { getStepPhase, isStepComplete, hasIncompleteChains, getNextChainIndex, isStepResumable } from './lifecycle.js';
+export { getStepPhase, isStepComplete, isStepFailed, isStepTerminal, hasIncompleteChains, getNextChainIndex, isStepResumable } from './lifecycle.js';
 
 // Debug utilities (for external use if needed)
 export { logLifecycle, logResume, logQueue, logStepData, logDebug, logPersistence } from './debug.js';

@@ -16,6 +16,10 @@ export interface StepData {
   completedChains?: number[];
   /** ISO timestamp when step fully completed (presence indicates step is done) */
   completedAt?: string;
+  /** ISO timestamp when step failed (presence indicates step failed) */
+  failedAt?: string;
+  /** Error message if step failed */
+  error?: string;
 }
 
 /**
@@ -38,6 +42,8 @@ export enum StepLifecyclePhase {
   CHAIN_IN_PROGRESS = 'CHAIN_IN_PROGRESS',
   /** Step fully completed */
   COMPLETED = 'COMPLETED',
+  /** Step permanently failed (unrecoverable) */
+  FAILED = 'FAILED',
 }
 
 /**

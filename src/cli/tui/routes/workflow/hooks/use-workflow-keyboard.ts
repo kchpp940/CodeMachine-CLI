@@ -59,6 +59,18 @@ export interface UseWorkflowKeyboardOptions {
   returnToController?: () => void
   /** Check if workflow has a controller */
   hasController?: () => boolean
+  /** Toggle diagnostic panel */
+  toggleDiagnosticPanel?: () => void
+  /** Diagnostic panel: continue selected agent */
+  diagnosticContinue?: (agentId: string) => void
+  /** Diagnostic panel: mark selected agent as failed */
+  diagnosticMarkFailed?: (agentId: string) => void
+  /** Diagnostic panel: open log for selected agent */
+  diagnosticOpenLog?: (agentId: string) => void
+  /** Check if diagnostic panel is visible */
+  isDiagnosticPanelVisible?: () => boolean
+  /** Show toast notification (for keyboard-triggered actions) */
+  showToast?: (type: "success" | "error" | "warning" | "info", message: string, duration?: number) => void
 }
 
 /**
@@ -130,6 +142,71 @@ export function useWorkflowKeyboard(options: UseWorkflowKeyboardOptions) {
     if (evt.name === "h") {
       evt.preventDefault()
       options.openHistory()
+      return
+    }
+
+    // D key - toggle diagnostic panel
+    if (evt.name === "d") {
+      evt.preventDefault()
+      options.toggleDiagnosticPanel?.()
+      return
+    }
+
+    // === DIAGNOSTIC PANEL SHORTCUTS ===
+    // Only active when diagnostic panel is visible
+    const diagVisible = options.isDiagnosticPanelVisible?.()
+
+    // C key - continue selected stuck agent
+    if (evt.name === "c" && diagVisible) {
+      evt.preventDefault()
+      const s = options.getState()
+      const agentId = s.selectedSubAgentId || s.selectedAgentId || options.getCurrentAgentId?.()
+      if (agentId) {
+        const mainAgent = s.agents.find((a) => a.id === agentId)
+        let subAgent: typeof s extends { subAgents: Map<string, Array<infer U>> } ? U : never | undefined
+        if (!mainAgent) {
+          for (const subs of s.subAgents.values()) {
+            const found = subs.find((sa) => sa.id === agentId)
+            if (found) {
+              subAgent = found
+              break
+            }
+          }
+        }
+        const agent = mainAgent ?? subAgent
+
+        if (agent?.status === "failed") {
+          options.showToast?.("error", "Cannot continue: step has failed", 5000)
+          return
+        }
+        if (agent?.status === "running") {
+          options.showToast?.("info", "Step is currently running — cannot resume", 3000)
+          return
+        }
+        options.diagnosticContinue?.(agentId)
+      }
+      return
+    }
+
+    // F key - mark selected stuck agent as failed
+    if (evt.name === "f" && diagVisible) {
+      evt.preventDefault()
+      const s = options.getState()
+      const agentId = s.selectedSubAgentId || s.selectedAgentId || options.getCurrentAgentId?.()
+      if (agentId) {
+        options.diagnosticMarkFailed?.(agentId)
+      }
+      return
+    }
+
+    // L key - open log for selected stuck agent
+    if (evt.name === "l" && diagVisible) {
+      evt.preventDefault()
+      const s = options.getState()
+      const agentId = s.selectedSubAgentId || s.selectedAgentId || options.getCurrentAgentId?.()
+      if (agentId) {
+        options.diagnosticOpenLog?.(agentId)
+      }
       return
     }
 

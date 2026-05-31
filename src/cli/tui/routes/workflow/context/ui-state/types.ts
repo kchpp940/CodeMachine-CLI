@@ -62,6 +62,7 @@ export type UIActions = {
   updateControllerStatus(status: AgentStatus): void
   updateControllerMonitoring(monitoringId: number): void
   setWorkflowView(view: WorkflowView): void
+  toggleDiagnosticPanel(): void
   /** Reset state for a new workflow */
   reset(workflowName: string): void
 }

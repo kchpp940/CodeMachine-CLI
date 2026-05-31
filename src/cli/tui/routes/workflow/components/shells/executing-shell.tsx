@@ -42,6 +42,9 @@ export function ExecutingShell(props: ExecutingShellProps) {
           <AgentTimeline
             state={shell.state()}
             onToggleExpand={(id) => shell.ui.actions.toggleExpand(id)}
+            onContinue={(agentId) => shell.handleDiagnosticContinue(agentId)}
+            onMarkFailed={(agentId) => shell.handleDiagnosticMarkFailed(agentId)}
+            onOpenLog={(agentId) => shell.handleDiagnosticOpenLog(agentId)}
             availableHeight={shell.state().visibleItemCount}
             availableWidth={timelineAvailableWidth()}
             isPromptBoxFocused={shell.isPromptBoxFocused()}

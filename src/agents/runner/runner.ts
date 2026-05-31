@@ -6,7 +6,6 @@ import { AgentMonitorService, AgentLoggerService, StatusService } from '../monit
 
 export type { ChainedPrompt } from './chained.js';
 import type { ParsedTelemetry } from '../../infra/engines/core/types.js';
-import { assertEngineCapabilities } from '../../infra/engines/core/types.js';
 import { formatForLogFile } from '../../shared/formatters/logFileFormatter.js';
 import { renderToChalk } from '../../shared/formatters/outputMarkers.js';
 import { info, error, debug } from '../../shared/logging/logger.js';
@@ -331,26 +330,10 @@ export async function executeAgent(
     throw new Error(`Engine not found: ${engineType}`);
   }
 
-  const engineCapabilities = engineModule.metadata.capabilities;
-
-  // Unified capability validation: throw if any explicitly-requested feature
-  // is not supported by the selected engine.
-  assertEngineCapabilities(engineModule.metadata.name, engineCapabilities, {
-    model: modelOverride || (!didFallback ? (agentConfig.model as string | undefined) : undefined),
-    modelReasoningEffort: agentConfig.modelReasoningEffort as string | undefined,
-    resumeSessionId,
-  });
-
   // Model resolution: CLI override > agent config (legacy) > engine default
   // When falling back to a different engine, ignore agent's model config (it's for the original engine)
-  const model = engineCapabilities.model
-    ? (modelOverride ?? (didFallback ? undefined : (agentConfig.model as string | undefined)) ?? engineModule.metadata.defaultModel)
-    : undefined;
-
-  // Reasoning effort: only include when the engine declares support
-  const modelReasoningEffort = engineCapabilities.reasoningEffort
-    ? ((agentConfig.modelReasoningEffort as 'low' | 'medium' | 'high' | undefined) ?? engineModule.metadata.defaultModelReasoningEffort)
-    : undefined;
+  const model = modelOverride ?? (didFallback ? undefined : (agentConfig.model as string | undefined)) ?? engineModule.metadata.defaultModel;
+  const modelReasoningEffort = (agentConfig.modelReasoningEffort as 'low' | 'medium' | 'high' | undefined) ?? engineModule.metadata.defaultModelReasoningEffort;
 
   // Initialize monitoring with engine/model info (unless explicitly disabled)
   const monitor = !disableMonitoring ? AgentMonitorService.getInstance() : null;
@@ -427,7 +410,7 @@ export async function executeAgent(
 
   try {
     const result = await engine.run({
-      prompt,
+      prompt, // Already complete and ready to use
       workingDir,
       resumeSessionId,
       resumePrompt: resumeSessionId ? (resumePrompt || STEP_RESUME_DEFAULT) : undefined,

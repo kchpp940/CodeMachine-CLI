@@ -8,14 +8,6 @@ export const metadata: EngineMetadata = {
   cliBinary: 'cursor-agent',
   installCommand: 'curl https://cursor.com/install -fsS | bash',
   defaultModel: 'auto',
-  capabilities: {
-    resume: true,
-    model: true,
-    workingDir: true,
-    streamLog: true,
-    reasoningEffort: false,
-    interactiveInput: false,
-  },
   order: 4,
   experimental: true,
 };

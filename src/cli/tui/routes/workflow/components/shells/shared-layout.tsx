@@ -54,6 +54,7 @@ export function SharedLayout(props: SharedLayoutProps) {
           autonomousMode={shell.state().autonomousMode}
           view={shell.state().view}
           hasController={!!shell.state().controllerState}
+          diagnosticPanelVisible={shell.state().diagnosticPanelVisible}
         />
       </box>
 

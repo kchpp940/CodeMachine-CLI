@@ -9,13 +9,5 @@ export const metadata: EngineMetadata = {
   installCommand: 'npm install -g @openai/codex',
   defaultModel: 'gpt-5.2-codex',
   defaultModelReasoningEffort: 'medium',
-  capabilities: {
-    resume: true,
-    model: true,
-    workingDir: true,
-    streamLog: true,
-    reasoningEffort: true,
-    interactiveInput: false,
-  },
   order: 3,
 };

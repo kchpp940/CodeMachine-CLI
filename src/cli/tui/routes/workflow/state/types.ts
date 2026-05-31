@@ -165,6 +165,7 @@ export interface WorkflowState {
   workflowStatus: WorkflowStatus
   agentIdMapVersion: number
   agentLogs: Map<string, string[]>
+  diagnosticPanelVisible: boolean
   autonomousMode: AutonomousMode
   controllerState: ControllerState | null
 }

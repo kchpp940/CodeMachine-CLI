@@ -14,6 +14,7 @@ export interface StatusFooterProps {
   autonomousMode?: AutonomousMode
   view?: WorkflowView
   hasController?: boolean
+  diagnosticPanelVisible?: boolean
 }
 
 /**
@@ -36,10 +37,13 @@ export function StatusFooter(props: StatusFooterProps) {
   const controllerText = () =>
     (props.view === 'executing' && props.hasController) ? '[R] Controller  ' : ''
 
+  const diagnosticText = () =>
+    props.diagnosticPanelVisible ? '[C] Continue  [F] Mark Fail  [L] Open Log  ' : ''
+
   return (
     <box paddingLeft={1} paddingRight={1}>
       <text fg={themeCtx.theme.textMuted}>
-        [↑↓] Navigate  [ENTER] Expand/View  [Tab] Toggle Panel  [H] History  [P] Pause  [Ctrl+S] Skip  {controllerText()}[Esc] Stop  {autoText()}
+        [↑↓] Navigate  [ENTER] Expand/View  [Tab] Toggle Panel  [H] History  [D] Diagnose  {diagnosticText()}[P] Pause  [Ctrl+S] Skip  {controllerText()}[Esc] Stop  {autoText()}
       </text>
     </box>
   )

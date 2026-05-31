@@ -251,39 +251,23 @@ export async function runControllerView(
   // Resolve engine and model upfront (before execution) like step agents do
   // This ensures UI shows engine/model immediately, not after first turn
   debug('[ControllerView] Resolving engine and model upfront');
-  const { selectEngine, requiredCapabilitiesForStep } = await import('../step/engine.js');
+  const { selectEngine } = await import('../step/engine.js');
   const { registry } = await import('../../infra/engines/index.js');
-  const { assertEngineCapabilities, DEFAULT_CAPABILITIES } = await import('../../infra/engines/core/types.js');
 
-  // Build capability request from controller config
-  const requestedModel = definition.options?.model ?? (controller.model as string | undefined);
-  const requestedReasoningEffort = definition.options?.modelReasoningEffort;
-
+  // Create a step-like object for selectEngine
+  // Priority: workflow template options > agent config > first authenticated engine
   const stepLike = {
     engine: definition.options?.engine ?? controller.engine,
-    model: requestedModel,
-    modelReasoningEffort: requestedReasoningEffort,
     agentId: controller.id,
     agentName: (controller.name as string | undefined) ?? controller.id,
   };
 
-  const requiredCaps = requiredCapabilitiesForStep(stepLike, false);
-  const resolvedEngine = await selectEngine(stepLike, emitter, controller.id, requiredCaps);
+  const resolvedEngine = await selectEngine(stepLike, emitter, controller.id);
   debug('[ControllerView] Resolved engine: %s', resolvedEngine);
 
-  // Unified capability validation after engine selection
-  const engineModule = registry.get(resolvedEngine);
-  const engineCapabilities = engineModule?.metadata.capabilities;
-  assertEngineCapabilities(engineModule?.metadata.name ?? resolvedEngine, engineCapabilities ?? DEFAULT_CAPABILITIES, {
-    model: requestedModel,
-    modelReasoningEffort: requestedReasoningEffort,
-  });
-
   // Resolve model from definition override, agent config, or engine default
-  // Only apply model when the engine declares model support
-  const resolvedModel = engineCapabilities?.model
-    ? (requestedModel ?? engineModule?.metadata.defaultModel)
-    : undefined;
+  const engineModule = registry.get(resolvedEngine);
+  const resolvedModel = definition.options?.model ?? controller.model ?? engineModule?.metadata.defaultModel;
   debug('[ControllerView] Resolved model: %s', resolvedModel);
 
   // Emit controller info BEFORE execution so UI shows it immediately

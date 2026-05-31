@@ -24,6 +24,7 @@ import { handleSkipSignal } from '../handlers/skip.js';
 import { handleStopSignal } from '../handlers/stop.js';
 import { handleModeChangeSignal } from '../handlers/mode.js';
 import { handleReturnToControllerSignal } from '../handlers/return.js';
+import { handleMarkFailedSignal, type MarkFailedSignalPayload } from '../handlers/mark-failed.js';
 
 /**
  * SignalManager - central coordinator for all workflow signals
@@ -109,6 +110,17 @@ export class SignalManager implements SignalContext {
     process.on('workflow:return-to-controller', returnToControllerHandler);
     this.cleanupFns.push(() =>
       process.removeListener('workflow:return-to-controller', returnToControllerHandler)
+    );
+
+    // Mark failed signal (from diagnostic panel)
+    const markFailedHandler = (data: MarkFailedSignalPayload) => {
+      handleMarkFailedSignal(this, data).catch(err =>
+        debug('[SignalManager] Mark failed handler error: %s', err.message)
+      );
+    };
+    process.on('workflow:mark-failed', markFailedHandler);
+    this.cleanupFns.push(() =>
+      process.removeListener('workflow:mark-failed', markFailedHandler)
     );
 
     debug('[SignalManager] All listeners registered');

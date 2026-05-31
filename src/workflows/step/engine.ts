@@ -5,36 +5,8 @@
  */
 
 import { registry } from '../../infra/engines/index.js';
-import type { EngineCapabilities } from '../../infra/engines/core/types.js';
-import { capabilityErrorMessage } from '../../infra/engines/core/types.js';
 import { debug } from '../../shared/logging/logger.js';
 import type { WorkflowEventEmitter } from '../events/index.js';
-
-interface StepWithConfig {
-  model?: string;
-  modelReasoningEffort?: string;
-  engine?: string;
-  agentId: string;
-  agentName?: string;
-}
-
-/**
- * Derive the capability keys a step *requires* from its own configuration.
- *
- * If a step explicitly sets a model, the selected engine MUST support model
- * selection – otherwise the configuration is contradictory.
- * Same for reasoningEffort and resume.
- */
-export function requiredCapabilitiesForStep(
-  step: StepWithConfig,
-  isResume: boolean,
-): Array<keyof EngineCapabilities> {
-  const caps: Array<keyof EngineCapabilities> = [];
-  if (step.model) caps.push('model');
-  if (step.modelReasoningEffort) caps.push('reasoningEffort');
-  if (isResume) caps.push('resume');
-  return caps;
-}
 
 /**
  * Cache for engine authentication status with TTL
@@ -86,28 +58,21 @@ export class EngineAuthCache {
 // Global auth cache instance
 export const authCache = new EngineAuthCache();
 
+interface StepWithEngine {
+  engine?: string;
+  agentId: string;
+  agentName?: string;
+}
+
 /**
- * Select engine for step execution with fallback logic.
- *
- * @param step - Step definition (may specify an engine override)
- * @param emitter - Event emitter for logging messages
- * @param uniqueAgentId - Unique agent ID for message routing
- * @param requiredCapabilities - Capability keys that the selected engine MUST support.
- *                               Engines missing a required capability are skipped during
- *                               fallback search, producing a clear error if none match.
+ * Select engine for step execution with fallback logic
  */
 export async function selectEngine(
-  step: StepWithConfig,
+  step: StepWithEngine,
   emitter: WorkflowEventEmitter,
-  uniqueAgentId: string,
-  requiredCapabilities: Array<keyof EngineCapabilities> = [],
+  uniqueAgentId: string
 ): Promise<string> {
-  debug(`[step/engine] step.engine=${step.engine} requiredCapabilities=[${requiredCapabilities.join(', ')}]`);
-
-  const meetsCapabilities = (engineId: string): boolean => {
-    const caps = registry.getCapabilities(engineId);
-    return requiredCapabilities.every(key => caps[key] === true);
-  };
+  debug(`[step/engine] step.engine=${step.engine}`);
 
   // Determine engine: step override > first authenticated engine
   let engineType: string;
@@ -121,26 +86,12 @@ export async function selectEngine(
     const isOverrideAuthed = overrideEngine
       ? await authCache.isAuthenticated(overrideEngine.metadata.id, () => overrideEngine.auth.isAuthenticated())
       : false;
-    const overrideMeetsCaps = meetsCapabilities(engineType);
-    debug(`[step/engine] isOverrideAuthed=${isOverrideAuthed} meetsCapabilities=${overrideMeetsCaps}`);
-
-    // When the explicitly-configured engine lacks required capabilities, that is
-    // a hard error – silently falling back would hide a configuration mismatch.
-    if (!overrideMeetsCaps && overrideEngine) {
-      const gaps = requiredCapabilities.filter(key => !registry.getCapabilities(engineType)[key]);
-      const messages = gaps.map(cap => capabilityErrorMessage(overrideEngine.metadata.name, cap));
-      throw new Error(messages.join(' '));
-    }
-
+    debug(`[step/engine] isOverrideAuthed=${isOverrideAuthed}`);
     if (!isOverrideAuthed) {
-      // Find first authenticated engine that meets capability requirements (with caching)
+      // Find first authenticated engine by order (with caching)
       const engines = registry.getAll();
       let fallbackEngine = null as typeof overrideEngine | null;
       for (const eng of engines) {
-        if (!meetsCapabilities(eng.metadata.id)) {
-          debug(`[step/engine] Skipping ${eng.metadata.id} – missing required capabilities`);
-          continue;
-        }
         const isAuth = await authCache.isAuthenticated(
           eng.metadata.id,
           () => eng.auth.isAuthenticated()
@@ -164,16 +115,12 @@ export async function selectEngine(
     }
   } else {
     debug(`[step/engine] No step.engine specified, finding authenticated engine...`);
-    // Fallback: find first authenticated engine that meets capability requirements (with caching)
+    // Fallback: find first authenticated engine by order (with caching)
     const engines = registry.getAll();
     debug(`[step/engine] Available engines: ${engines.map(e => e.metadata.id).join(', ')}`);
     let foundEngine = null;
 
     for (const engine of engines) {
-      if (!meetsCapabilities(engine.metadata.id)) {
-        debug(`[step/engine] Skipping ${engine.metadata.id} – missing required capabilities`);
-        continue;
-      }
       debug(`[step/engine] Checking auth for engine: ${engine.metadata.id}`);
       const isAuth = await authCache.isAuthenticated(
         engine.metadata.id,
@@ -188,19 +135,13 @@ export async function selectEngine(
 
     if (!foundEngine) {
       debug(`[step/engine] No authenticated engine found, using default`);
+      // If no authenticated engine, use default (first by order)
       foundEngine = registry.getDefault();
     }
 
     if (!foundEngine) {
       debug(`[step/engine] No engines registered at all!`);
       throw new Error('No engines registered. Please install at least one engine.');
-    }
-
-    // Verify the default/found engine meets capabilities; if not, error clearly
-    if (!meetsCapabilities(foundEngine.metadata.id) && requiredCapabilities.length > 0) {
-      const gaps = requiredCapabilities.filter(key => !registry.getCapabilities(foundEngine.metadata.id)[key]);
-      const messages = gaps.map(cap => capabilityErrorMessage(foundEngine.metadata.name, cap));
-      throw new Error(`No authenticated engine supports the required capabilities. ${messages.join(' ')}`);
     }
 
     engineType = foundEngine.metadata.id;
