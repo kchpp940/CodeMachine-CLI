@@ -33,7 +33,14 @@ import { getAllInstalledImports } from '../shared/imports/index.js';
 import { registerImportedAgents, clearImportedAgents } from './utils/config.js';
 
 // Re-export from preflight for backward compatibility
-export { ValidationError, checkWorkflowCanStart, checkSpecificationRequired, checkOnboardingRequired, needsOnboarding } from './preflight.js';
+export {
+  ValidationError,
+  checkWorkflowCanStart,
+  checkSpecificationRequired,
+  checkOnboardingRequired,
+  needsOnboarding,
+  validateAllPromptPaths,
+} from './preflight.js';
 export type { WorkflowStep, WorkflowTemplate };
 
 /**

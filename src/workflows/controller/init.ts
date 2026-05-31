@@ -5,16 +5,14 @@
  */
 
 import { readFile } from 'node:fs/promises';
-import { existsSync } from 'node:fs';
 import * as path from 'node:path';
-import type { ControllerConfig } from './types.js';
-import type { InitControllerOptions, InitControllerResult } from './types.js';
+import type { ControllerConfig, InitControllerOptions, InitControllerResult } from './types.js';
 import { executeAgent } from '../../agents/runner/runner.js';
 import { AgentMonitorService } from '../../agents/monitoring/index.js';
 import { processPromptString } from '../../shared/prompts/index.js';
 import { debug } from '../../shared/logging/logger.js';
 import { saveControllerConfig } from './config.js';
-import { resolvePromptPath } from '../../shared/imports/index.js';
+import { resolvePromptPath, formatCheckedPaths } from '../../shared/imports/index.js';
 import { getDevRoot } from '../../shared/runtime/dev.js';
 
 const localRoot = getDevRoot() || '';
@@ -39,28 +37,46 @@ export async function initControllerAgent(
   const promptPaths = Array.isArray(promptPath) ? promptPath : [promptPath];
   debug('[Controller] Prompt paths to load: %o', promptPaths);
 
-  // Load and combine all prompt files - check imports first, then cwd
+  // Load and combine all prompt files - check local first, then imports
   const promptParts: string[] = [];
   for (const p of promptPaths) {
     let resolvedPath: string;
+
     if (path.isAbsolute(p)) {
+      debug('[Controller] Using absolute path directly: %s', p);
       resolvedPath = p;
     } else {
-      // Try to resolve from imports first
-      const importResolved = resolvePromptPath(p, localRoot);
-      resolvedPath = importResolved ?? path.resolve(cwd, p);
+      const resolveResult = resolvePromptPath(p, localRoot);
+      if (resolveResult.path) {
+        debug('[Controller] Resolved prompt path: %s (source: %s)', resolveResult.path, resolveResult.source);
+        resolvedPath = resolveResult.path;
+      } else {
+        const checkedPaths = formatCheckedPaths(resolveResult.checkedPaths);
+        throw new Error(
+          `Relative promptPath "${p}" could not be resolved for controller agent "${agentId}".${checkedPaths}\n` +
+          `Please ensure the prompt file exists in your local prompts/templates/ directory, ` +
+          `or in an imported package.`
+        );
+      }
     }
-    debug('[Controller] Resolved prompt path: %s', resolvedPath);
 
-    const promptExists = existsSync(resolvedPath);
-    debug('[Controller] Prompt file exists: %s', promptExists);
-    if (!promptExists) {
-      throw new Error(`Prompt file not found: ${resolvedPath} (checked imports and cwd)`);
+    try {
+      const content = await readFile(resolvedPath, 'utf8');
+      debug('[Controller] Read prompt file %s, length=%d', resolvedPath, content.length);
+      promptParts.push(content);
+    } catch (fileError) {
+      if (path.isAbsolute(p)) {
+        throw new Error(
+          `Resolved prompt file does not exist: "${resolvedPath}"\n` +
+          `This path was already resolved to an absolute path by the step resolver. ` +
+          `The file may have been moved or deleted after the workflow started.`
+        );
+      }
+      throw new Error(
+        `Failed to read prompt file "${p}" resolved to "${resolvedPath}": ` +
+        `${fileError instanceof Error ? fileError.message : String(fileError)}`
+      );
     }
-
-    const content = await readFile(resolvedPath, 'utf8');
-    debug('[Controller] Read prompt file %s, length=%d', resolvedPath, content.length);
-    promptParts.push(content);
   }
 
   const rawPrompt = promptParts.join('\n\n');

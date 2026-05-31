@@ -2,7 +2,7 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import * as path from 'node:path';
 import { debug } from '../logging/logger.js';
-import { getAllInstalledImports, resolveWorkflowTemplate } from '../imports/index.js';
+import { resolveWorkflowTemplate, formatCheckedPaths } from '../imports/index.js';
 import { getDevRoot } from '../runtime/dev.js';
 
 const TEMPLATE_TRACKING_FILE = 'template.json';
@@ -162,43 +162,64 @@ export async function hasTemplateChanged(cmRoot: string, templateName: string): 
 /**
  * Gets the full template path from the tracking file.
  * Returns the default template if no template is tracked.
- * Searches both local templates and imported packages.
+ * Searches local templates first, then imported packages.
  */
 export async function getTemplatePathFromTracking(cmRoot: string): Promise<string> {
   const activeTemplate = await getActiveTemplate(cmRoot);
 
   const templateName = activeTemplate || 'ali.workflow.js';
+  const localRoot = getDevRoot() || '';
 
-  // Try imports first
-  const importResolved = resolveWorkflowTemplate(templateName, getDevRoot() || '');
-  if (importResolved && existsSync(importResolved)) {
-    debug('[Template] Resolved template via imports: %s', importResolved);
-    return importResolved;
+  // Check local first, then imports (unified resolution with conflict detection)
+  const resolveResult = resolveWorkflowTemplate(templateName, localRoot);
+
+  if (resolveResult.path) {
+    debug('[Template] Resolved template %s to: %s (source: %s)',
+      templateName, resolveResult.path, resolveResult.source);
+    return resolveResult.path;
   }
 
-  // Search imported packages' workflow directories
-  const imports = getAllInstalledImports();
-  for (const imp of imports) {
-    const importedPath = path.join(imp.resolvedPaths.workflows, templateName);
-    if (existsSync(importedPath)) {
-      debug('[Template] Found template in imported package %s: %s', imp.name, importedPath);
-      return importedPath;
+  // Return a meaningful fallback path for error messages
+  const fallbackPath = localRoot
+    ? path.join(localRoot, 'templates', 'workflows', templateName)
+    : templateName;
+
+  debug('[Template] Template not found, returning fallback path: %s', fallbackPath);
+  return fallbackPath;
+}
+
+/**
+ * Validates that a workflow template exists before execution.
+ * Throws a clear error with all checked paths if not found.
+ * @param templatePath - Template name or path to validate
+ * @param localRoot - Local root directory
+ * @returns Resolved absolute path to the template
+ * @throws Error with detailed information if template not found
+ */
+export function validateWorkflowTemplateExists(templatePath: string, localRoot: string): string {
+  if (path.isAbsolute(templatePath)) {
+    if (existsSync(templatePath)) {
+      return templatePath;
     }
+    throw new Error(
+      `Resolved workflow template does not exist: "${templatePath}"\n` +
+      `This path was already resolved to an absolute path. ` +
+      `The file may have been moved or deleted.`
+    );
   }
 
-  // Dev root fallback
-  const devRoot = getDevRoot();
-  if (devRoot) {
-    const localPath = path.join(devRoot, 'templates', 'workflows', templateName);
-    if (existsSync(localPath)) {
-      return localPath;
-    }
-    // Return local path even if missing — will give a meaningful error
-    return localPath;
+  const resolveResult = resolveWorkflowTemplate(templatePath, localRoot);
+
+  if (resolveResult.path) {
+    return resolveResult.path;
   }
 
-  // Last resort — return the template name; callers will get a clear error
-  return templateName;
+  const checkedPaths = formatCheckedPaths(resolveResult.checkedPaths);
+  throw new Error(
+    `Workflow template not found: "${templatePath}"${checkedPaths}\n` +
+    `Make sure the template exists in your local templates/workflows/ directory, ` +
+    `or in an imported package.`
+  );
 }
 
 /**

@@ -5,7 +5,7 @@ import type { WorkflowTemplate } from './types.js';
 import { validateWorkflowTemplate } from './validator.js';
 import { ensureTemplateGlobals } from './globals.js';
 import { getDevRoot } from '../../shared/runtime/dev.js';
-import { resolveWorkflowTemplate } from '../../shared/imports/index.js';
+import { resolveWorkflowTemplate, formatCheckedPaths } from '../../shared/imports/index.js';
 import { otel_debug } from '../../shared/logging/logger.js';
 import { LOGGER_NAMES } from '../../shared/logging/otel-logger.js';
 
@@ -40,15 +40,12 @@ export async function loadTemplate(cwd: string, templatePath: string): Promise<W
   otel_debug(LOGGER_NAMES.CLI, '[TemplateLoader] localRoot: %s', [localRoot]);
   otel_debug(LOGGER_NAMES.CLI, '[TemplateLoader] isAbsolute: %s', [path.isAbsolute(templatePath)]);
 
-  let resolvedPath: string;
-  if (path.isAbsolute(templatePath)) {
-    resolvedPath = templatePath;
-  } else {
-    const importResolved = resolveWorkflowTemplate(templatePath, localRoot);
-    resolvedPath = importResolved ?? (localRoot ? path.resolve(localRoot, templatePath) : templatePath);
-  }
+  const resolveResult = resolveWorkflowTemplate(templatePath, localRoot);
+  const resolvedPath = resolveResult.path ?? (
+    localRoot ? path.resolve(localRoot, 'templates', 'workflows', templatePath) : templatePath
+  );
 
-  otel_debug(LOGGER_NAMES.CLI, '[TemplateLoader] resolvedPath: %s', [resolvedPath]);
+  otel_debug(LOGGER_NAMES.CLI, '[TemplateLoader] resolvedPath: %s (source: %s)', [resolvedPath, resolveResult.source || 'unknown']);
 
   try {
     otel_debug(LOGGER_NAMES.CLI, '[TemplateLoader] Loading module from: %s', [resolvedPath]);
@@ -66,7 +63,8 @@ export async function loadTemplate(cwd: string, templatePath: string): Promise<W
       throw e;
     }
     const rel = path.relative(cwd, resolvedPath);
-    throw new Error(`Failed to load template ${rel}: ${e instanceof Error ? e.message : String(e)}`);
+    const checkedPaths = formatCheckedPaths(resolveResult.checkedPaths);
+    throw new Error(`Failed to load template ${rel}: ${e instanceof Error ? e.message : String(e)}${checkedPaths}`);
   }
 }
 
@@ -75,15 +73,12 @@ export async function loadTemplateWithPath(cwd: string, templatePath: string): P
   otel_debug(LOGGER_NAMES.CLI, '[TemplateLoader] templatePath input: %s', [templatePath]);
   otel_debug(LOGGER_NAMES.CLI, '[TemplateLoader] localRoot: %s', [localRoot]);
 
-  let resolvedPath: string;
-  if (path.isAbsolute(templatePath)) {
-    resolvedPath = templatePath;
-  } else {
-    const importResolved = resolveWorkflowTemplate(templatePath, localRoot);
-    resolvedPath = importResolved ?? (localRoot ? path.resolve(localRoot, templatePath) : templatePath);
-  }
+  const resolveResult = resolveWorkflowTemplate(templatePath, localRoot);
+  const resolvedPath = resolveResult.path ?? (
+    localRoot ? path.resolve(localRoot, 'templates', 'workflows', templatePath) : templatePath
+  );
 
-  otel_debug(LOGGER_NAMES.CLI, '[TemplateLoader] resolvedPath: %s', [resolvedPath]);
+  otel_debug(LOGGER_NAMES.CLI, '[TemplateLoader] resolvedPath: %s (source: %s)', [resolvedPath, resolveResult.source || 'unknown']);
 
   try {
     const tpl = (await loadWorkflowModule(resolvedPath)) as unknown;
@@ -100,6 +95,7 @@ export async function loadTemplateWithPath(cwd: string, templatePath: string): P
       throw e;
     }
     const rel = path.relative(cwd, resolvedPath);
-    throw new Error(`Failed to load template ${rel}: ${e instanceof Error ? e.message : String(e)}`);
+    const checkedPaths = formatCheckedPaths(resolveResult.checkedPaths);
+    throw new Error(`Failed to load template ${rel}: ${e instanceof Error ? e.message : String(e)}${checkedPaths}`);
   }
 }

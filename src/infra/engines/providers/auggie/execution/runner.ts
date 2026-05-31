@@ -90,9 +90,13 @@ export async function runAuggie(options: RunAuggieOptions): Promise<RunAuggieRes
   const runnerEnv = resolveRunnerEnv(env);
   const { command, args } = buildAuggieRunCommand({ model, resumeSessionId });
 
+  // Add working directory to args (Auggie uses --workspace-root, not --cwd)
   args.push('--workspace-root', workingDir);
 
+  // When resuming, use the resume prompt instead of the original prompt
   const effectivePrompt = resumeSessionId ? resumePrompt! : prompt;
+
+  // Add prompt as positional argument (Auggie accepts it as the last argument)
   args.push(effectivePrompt);
 
   logger.debug(

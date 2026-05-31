@@ -203,8 +203,12 @@ function formatStreamJsonLine(line: string): string[] | null {
 export async function runMistral(options: RunMistralOptions): Promise<RunMistralResult> {
   const { prompt, workingDir, resumeSessionId, resumePrompt, model, env, onData, onErrorData, onTelemetry, onSessionId, abortSignal, timeout = 1800000 } = options;
 
-  if (!prompt && !resumeSessionId) {
+  if (!prompt) {
     throw new Error('runMistral requires a prompt.');
+  }
+
+  if (!workingDir) {
+    throw new Error('runMistral requires a working directory.');
   }
 
   // Set up VIBE_HOME / MISTRAL_CONFIG_DIR for authentication
@@ -240,7 +244,9 @@ export async function runMistral(options: RunMistralOptions): Promise<RunMistral
     return result;
   };
 
-  const { command, args } = buildMistralExecCommand({ workingDir, prompt, resumeSessionId, resumePrompt, model });
+  // When resuming, use the resume prompt instead of the original prompt
+  const effectivePrompt = resumeSessionId ? resumePrompt! : prompt;
+  const { command, args } = buildMistralExecCommand({ workingDir, prompt: effectivePrompt, resumeSessionId, model });
 
   // Create telemetry capture instance
   const telemetryCapture = createTelemetryCapture('mistral', model, prompt, workingDir);

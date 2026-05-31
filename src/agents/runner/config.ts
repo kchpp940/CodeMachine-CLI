@@ -3,7 +3,7 @@ import * as path from 'node:path';
 
 import { collectAgentDefinitions, resolveProjectRoot } from '../../shared/agents/index.js';
 import type { AgentDefinition } from '../../shared/agents/config/types.js';
-import { resolvePromptPath } from '../../shared/imports/index.js';
+import { resolvePromptPath, formatCheckedPaths } from '../../shared/imports/index.js';
 import { getDevRoot } from '../../shared/runtime/dev.js';
 
 const localRoot = getDevRoot() || '';
@@ -55,8 +55,6 @@ export async function loadAgentConfig(agentId: string, projectRoot?: string): Pr
  */
 export async function loadAgentTemplate(agentId: string, projectRoot?: string): Promise<string> {
   const config = await loadAgentConfig(agentId, projectRoot);
-  const lookupBase = projectRoot ?? process.env.CODEMACHINE_CWD ?? process.cwd();
-  const resolvedRoot = resolveProjectRoot(lookupBase);
 
   // Use config.promptPath if provided, otherwise generate default path from agent ID
   const configuredPath = config.promptPath ?? getDefaultPromptPath(agentId);
@@ -69,20 +67,45 @@ export async function loadAgentTemplate(agentId: string, projectRoot?: string): 
     throw new Error(`Agent ${agentId} has an invalid promptPath configuration`);
   }
 
-  // If path is absolute, use it directly; otherwise check imports first, then project root
-  const resolvedPromptPaths = promptSources.map(p => {
-    if (path.isAbsolute(p)) return p;
-
-    // Try to resolve from imports first
-    const importResolved = resolvePromptPath(p, localRoot);
-    if (importResolved) return importResolved;
-
-    // Fall back to project root
-    return path.resolve(resolvedRoot, p);
-  });
+  // If path is absolute, use it directly; otherwise check local first, then imports
+  const resolvedPromptPaths: string[] = [];
+  for (const p of promptSources) {
+    if (path.isAbsolute(p)) {
+      resolvedPromptPaths.push(p);
+    } else {
+      const resolveResult = resolvePromptPath(p, localRoot);
+      if (resolveResult.path) {
+        resolvedPromptPaths.push(resolveResult.path);
+      } else {
+        const checkedPaths = formatCheckedPaths(resolveResult.checkedPaths);
+        throw new Error(
+          `Relative promptPath "${p}" could not be resolved for agent "${agentId}".${checkedPaths}\n` +
+          `Please ensure the prompt file exists in your local prompts/templates/ directory, ` +
+          `or in an imported package.`
+        );
+      }
+    }
+  }
 
   const contentParts = await Promise.all(
-    resolvedPromptPaths.map(promptPath => fs.readFile(promptPath, 'utf-8')),
+    resolvedPromptPaths.map(async (resolvedPath, idx) => {
+      try {
+        return await fs.readFile(resolvedPath, 'utf-8');
+      } catch (fileError) {
+        const originalPath = promptSources[idx];
+        if (path.isAbsolute(originalPath)) {
+          throw new Error(
+            `Resolved prompt file does not exist: "${resolvedPath}"\n` +
+            `This path was already resolved to an absolute path by the step resolver. ` +
+            `The file may have been moved or deleted after the workflow started.`
+          );
+        }
+        throw new Error(
+          `Failed to read agent prompt "${originalPath}" resolved to "${resolvedPath}": ` +
+          `${fileError instanceof Error ? fileError.message : String(fileError)}`
+        );
+      }
+    }),
   );
   return contentParts.join('\n\n');
 }

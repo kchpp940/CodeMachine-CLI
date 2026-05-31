@@ -1,34 +1,20 @@
-import type { ProviderCommandOptions, ProviderCommand } from '../../shared/commandUtils.js';
-import { validateAllOptions } from '../../shared/commandUtils.js';
+export interface CodexCommandOptions {
+  workingDir: string;
+  resumeSessionId?: string;
+  resumePrompt?: string;
+  model?: string;
+  modelReasoningEffort?: 'low' | 'medium' | 'high';
+}
 
-export type CodexCommandOptions = ProviderCommandOptions;
-export type CodexCommand = ProviderCommand;
-
-const MODEL_MAP: Record<string, string> = {
-  'gpt-5-codex': 'gpt-5-codex',
-  'gpt-4': 'gpt-5-codex',
-};
-
-const VALID_MODELS = [
-  'gpt-5-codex',
-  'gpt-4o-codex',
-];
-
-const MODEL_CONFIG = {
-  modelMap: MODEL_MAP,
-  validModels: VALID_MODELS,
-  providerName: 'Codex',
-  modelSupport: 'supported' as const,
-};
+export interface CodexCommand {
+  command: string;
+  args: string[];
+}
 
 export function buildCodexCommand(options: CodexCommandOptions): CodexCommand {
-  const validation = validateAllOptions(options, MODEL_CONFIG);
-  if (!validation.isValid) {
-    throw new Error(validation.error);
-  }
+  const { workingDir, resumeSessionId, resumePrompt, model, modelReasoningEffort } = options;
 
-  const { mappedModel, validatedResumePrompt, isResume } = validation;
-
+  // Base args shared by both normal exec and resume
   const args = [
     'exec',
     '--json',
@@ -37,20 +23,24 @@ export function buildCodexCommand(options: CodexCommandOptions): CodexCommand {
     'danger-full-access',
     '--dangerously-bypass-approvals-and-sandbox',
     '-C',
-    options.workingDir,
+    workingDir,
   ];
 
-  if (mappedModel) {
-    args.push('--model', mappedModel);
+  // Add model if specified (only for new exec, not resume)
+  if (model && !resumeSessionId) {
+    args.push('--model', model);
   }
 
-  if (options.modelReasoningEffort) {
-    args.push('--config', `model_reasoning_effort="${options.modelReasoningEffort}"`);
+  // Add reasoning effort if specified
+  if (modelReasoningEffort) {
+    args.push('--config', `model_reasoning_effort="${modelReasoningEffort}"`);
   }
 
-  if (isResume) {
-    args.push('resume', options.resumeSessionId!, validatedResumePrompt!);
+  if (resumeSessionId) {
+    // Resume: add resume subcommand with session ID and combined prompt
+    args.push('resume', resumeSessionId, resumePrompt!);
   } else {
+    // Normal exec: read prompt from stdin
     args.push('-');
   }
 

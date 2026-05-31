@@ -14,7 +14,7 @@ import { processPromptString } from '../../shared/prompts/index.js';
 import { execute, type ChainedPrompt } from '../../agents/execution/index.js';
 import type { WorkflowEventEmitter } from '../events/emitter.js';
 import { debug } from '../../shared/logging/logger.js';
-import { resolvePromptPath } from '../../shared/imports/index.js';
+import { resolvePromptPath, formatCheckedPaths } from '../../shared/imports/index.js';
 import { getDevRoot } from '../../shared/runtime/dev.js';
 
 const localRoot = getDevRoot() || '';
@@ -96,29 +96,51 @@ export async function executeStep(
     throw new Error(`Agent ${step.agentId} has no promptPath configured`);
   }
 
-  // Load and process the prompt template(s) - check imports first, then local
-  const resolvedPromptPaths = promptSources.map(p => {
-    // Try to resolve (handles imports)
-    const resolved = resolvePromptPath(p, localRoot);
-    if (resolved) {
-      return resolved;
+  const resolvedPromptPaths: string[] = [];
+  for (const p of promptSources) {
+    if (path.isAbsolute(p)) {
+      debug(`[step/execute] Using absolute path directly: ${p}`);
+      resolvedPromptPaths.push(p);
+    } else {
+      const resolveResult = resolvePromptPath(p, localRoot);
+      if (resolveResult.path) {
+        debug(`[step/execute] Resolved prompt "${p}" to: ${resolveResult.path} (source: ${resolveResult.source})`);
+        resolvedPromptPaths.push(resolveResult.path);
+      } else {
+        const checkedPaths = formatCheckedPaths(resolveResult.checkedPaths);
+        throw new Error(
+          `Relative promptPath "${p}" could not be resolved for agent "${step.agentId}".${checkedPaths}\n` +
+          `Please ensure the prompt file exists in your local prompts/templates/ directory, ` +
+          `or in an imported package.`
+        );
+      }
     }
-
-    // If not found via imports, handle directly
-    if (path.isAbsolute(p)) return p;
-
-    // Fall back to cwd-relative resolution
-    return path.resolve(cwd, p);
-  });
+  }
   debug(`[step/execute] Resolved promptPath(s): ${resolvedPromptPaths.join(', ')}`);
 
   let rawPrompt: string;
   try {
     const parts = await Promise.all(
-      resolvedPromptPaths.map(async promptPath => {
-        const content = await readFile(promptPath, 'utf8');
-        debug(`[step/execute] Prompt loaded from ${promptPath}, length=${content.length}`);
-        return content;
+      resolvedPromptPaths.map(async (resolvedPath, idx) => {
+        try {
+          const content = await readFile(resolvedPath, 'utf8');
+          debug(`[step/execute] Prompt loaded from ${resolvedPath}, length=${content.length}`);
+          return content;
+        } catch (fileError) {
+          const originalPath = promptSources[idx];
+          const isAbsolute = path.isAbsolute(originalPath);
+          if (isAbsolute) {
+            throw new Error(
+              `Resolved prompt file does not exist: "${resolvedPath}"\n` +
+              `This path was already resolved to an absolute path by the step resolver. ` +
+              `The file may have been moved or deleted after the workflow started.`
+            );
+          }
+          throw new Error(
+            `Failed to read prompt file "${originalPath}" resolved to "${resolvedPath}": ` +
+            `${fileError instanceof Error ? fileError.message : String(fileError)}`
+          );
+        }
       }),
     );
     rawPrompt = parts.join('\n\n');

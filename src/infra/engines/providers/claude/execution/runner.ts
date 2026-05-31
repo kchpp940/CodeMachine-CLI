@@ -173,8 +173,12 @@ function formatStreamJsonLine(line: string): string[] | null {
 export async function runClaude(options: RunClaudeOptions): Promise<RunClaudeResult> {
   const { prompt, workingDir, resumeSessionId, resumePrompt, model, env, onData, onErrorData, onTelemetry, onSessionId, abortSignal, timeout = 1800000 } = options;
 
-  if (!prompt && !resumeSessionId) {
+  if (!prompt) {
     throw new Error('runClaude requires a prompt.');
+  }
+
+  if (!workingDir) {
+    throw new Error('runClaude requires a working directory.');
   }
 
   // Set up CLAUDE_CONFIG_DIR for authentication
@@ -226,7 +230,7 @@ export async function runClaude(options: RunClaudeOptions): Promise<RunClaudeRes
     return result;
   };
 
-  const { command, args } = buildClaudeExecCommand({ workingDir, resumeSessionId, resumePrompt, model });
+  const { command, args } = buildClaudeExecCommand({ workingDir, resumeSessionId, model });
 
   // Track state
   let capturedError: string | null = null;

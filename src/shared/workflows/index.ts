@@ -4,6 +4,7 @@ export {
   setActiveTemplate,
   hasTemplateChanged,
   getTemplatePathFromTracking,
+  validateWorkflowTemplateExists,
   getSelectedTrack,
   setSelectedTrack,
   getSelectedConditions,
