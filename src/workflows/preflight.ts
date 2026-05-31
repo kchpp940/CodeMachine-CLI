@@ -16,6 +16,10 @@ import { registerImportedAgents, clearImportedAgents } from './utils/config.js';
 import { getAllInstalledImports } from '../shared/imports/index.js';
 
 export { ValidationError } from '../runtime/services/index.js';
+export { dryPreview, formatDryPreviewResult, DryPreviewError } from './preflight/dry-preview.js';
+export { runDryPreviewCLI, DryPreviewAbortedError, DryPreviewNotConfirmedError, isInteractive } from './preflight/cli-preview.js';
+export type { DryPreviewResult, DryPreviewIssue, StepPreview, ControllerPreview, ImportSourceInfo, ChainedPromptPreview, IssueSeverity } from './preflight/dry-preview.js';
+export type { DryPreviewCLIOptions, DryPreviewConfirmedResult } from './preflight/cli-preview.js';
 
 /**
  * Ensure imported agents are registered before loading templates

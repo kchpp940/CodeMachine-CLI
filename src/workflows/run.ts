@@ -12,6 +12,7 @@ import * as path from 'node:path';
 import type { RunWorkflowOptions, WorkflowStep, WorkflowTemplate } from './templates/types.js';
 import { loadTemplateWithPath } from './templates/index.js';
 import { debug, setDebugLogFile } from '../shared/logging/logger.js';
+import { DryPreviewError } from './preflight/dry-preview.js';
 import {
   getTemplatePathFromTracking,
   getSelectedTrack,
@@ -32,8 +33,8 @@ import { runControllerView } from './controller/view.js';
 import { getAllInstalledImports } from '../shared/imports/index.js';
 import { registerImportedAgents, clearImportedAgents } from './utils/config.js';
 
-// Re-export from preflight for backward compatibility
-export { ValidationError, checkWorkflowCanStart, checkSpecificationRequired, checkOnboardingRequired, needsOnboarding } from './preflight.js';
+export { ValidationError, checkWorkflowCanStart, checkSpecificationRequired, checkOnboardingRequired, needsOnboarding, dryPreview, formatDryPreviewResult, DryPreviewError, runDryPreviewCLI, DryPreviewAbortedError, DryPreviewNotConfirmedError, isInteractive } from './preflight.js';
+export type { DryPreviewResult, DryPreviewIssue, StepPreview, ControllerPreview, ImportSourceInfo, ChainedPromptPreview, IssueSeverity, DryPreviewCLIOptions, DryPreviewConfirmedResult } from './preflight.js';
 export type { WorkflowStep, WorkflowTemplate };
 
 /**
@@ -59,6 +60,44 @@ export async function runWorkflow(options: RunWorkflowOptions = {}): Promise<voi
   const cmRoot = path.join(cwd, '.codemachine');
   const templatePath = options.templatePath || (await getTemplatePathFromTracking(cmRoot));
   const { template } = await loadTemplateWithPath(cwd, templatePath);
+
+  // Dry preview validation + confirmation - single source of truth
+  // - If previewConfirmed is provided (from TUI), verify it matches template and is valid
+  // - Otherwise, run CLI preview with confirmation based on options.confirm
+  // NOTE: This is the ONLY entry point for dry preview - no bypass possible
+  let confirmedPreview: {
+    valid: boolean;
+    templateName: string;
+    templatePath: string;
+    confirmedBy?: 'user' | 'flag';
+  };
+
+  if (options.previewConfirmed && options.previewConfirmed.valid && options.previewConfirmed.confirmed) {
+    // Verify provided preview is consistent with actual template
+    const actualTemplatePath = options.templatePath || templatePath;
+    if (options.previewConfirmed.templatePath !== actualTemplatePath) {
+      debug('[Workflow] previewConfirmed template mismatch: %s vs %s', options.previewConfirmed.templatePath, actualTemplatePath);
+      throw new DryPreviewError(
+        'Preview result template mismatch',
+        [{
+          severity: 'error',
+          category: 'other',
+          message: `Preview template "${options.previewConfirmed.templateName}" does not match loaded template "${template.name}"`,
+        }],
+      );
+    }
+    debug('[Workflow] Using confirmed preview result from caller (TUI mode)');
+    confirmedPreview = options.previewConfirmed;
+  } else {
+    debug('[Workflow] Running dry preview with confirmation');
+    const { runDryPreviewCLI } = await import('./preflight/cli-preview.js');
+    const confirmMode = options.yes === true ? 'yes' : options.confirm;
+    const result = await runDryPreviewCLI({ cwd, confirm: confirmMode });
+    confirmedPreview = result;
+    debug('[Workflow] Dry preview confirmed by %s', result.confirmedBy);
+  }
+
+  debug('[Workflow] Dry preview validated for "%s" at %s', confirmedPreview.templateName, confirmedPreview.templatePath);
 
   // Ensure template.json exists with correct activeTemplate before any setter functions are called
   // This prevents setControllerView/setSelectedTrack/etc from creating file with empty activeTemplate

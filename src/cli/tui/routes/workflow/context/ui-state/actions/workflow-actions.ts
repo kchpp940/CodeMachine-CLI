@@ -231,17 +231,10 @@ export function createWorkflowActions(ctx: WorkflowActionsContext) {
     ctx.notify()
   }
 
-  function toggleDiagnosticPanel(): void {
-    const state = ctx.getState()
-    ctx.setState({ ...state, diagnosticPanelVisible: !state.diagnosticPanelVisible })
-    ctx.notify()
-  }
-
   return {
     setWorkflowName,
     setWorkflowStatus,
     setWorkflowView,
-    toggleDiagnosticPanel,
     setCheckpointState,
     setInputState,
     setChainedState,

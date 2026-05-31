@@ -17,6 +17,7 @@ import { useUpdateNotifier } from "@tui/shared/context/update-notifier"
 import { Home } from "@tui/routes/home"
 import { Workflow } from "@tui/routes/workflow"
 import { Onboard } from "@tui/routes/onboard"
+import { DryPreview } from "@tui/routes/preview"
 import { homedir } from "os"
 import { WorkflowEventBus, OnboardingService } from "../../workflows/events/index.js"
 import { debug, setDebugLogFile, otel_debug } from "../../shared/logging/logger.js"
@@ -25,13 +26,19 @@ import { MonitoringCleanup } from "../../agents/monitoring/index.js"
 import path from "path"
 import { VERSION } from "../../runtime/version.js"
 import { setSelectedTrack, setSelectedConditions, setProjectName } from "../../shared/workflows/index.js"
-import { checkOnboardingRequired, needsOnboarding } from "../../workflows/preflight.js"
+import { checkOnboardingRequired, needsOnboarding, dryPreview } from "../../workflows/preflight.js"
+import type { DryPreviewResult } from "../../workflows/preflight/dry-preview.js"
 import type { TracksConfig, ConditionGroup } from "../../workflows/templates/types"
-import type { InitialToast } from "./app"
+import type { InitialToast, TUILaunchOptions } from "./app"
 import { exitTUI } from "./exit"
 
+function getTUILaunchOptions(): TUILaunchOptions | undefined {
+  const g = globalThis as Record<string, unknown>;
+  return g.__tuiLaunchOptions as TUILaunchOptions | undefined;
+}
+
 // Module-level view state for post-processing effects
-export let currentView: "home" | "onboard" | "workflow" = "home"
+export let currentView: "home" | "onboard" | "preview" | "workflow" = "home"
 
 /**
  * Get the clipboard copy method based on OS (lazy loaded)
@@ -133,8 +140,9 @@ export function App(props: { initialToast?: InitialToast }) {
 
   const [ctrlCPressed, setCtrlCPressed] = createSignal(false)
   let ctrlCTimeout: NodeJS.Timeout | null = null
-  const [view, setView] = createSignal<"home" | "onboard" | "workflow">("home")
+  const [view, setView] = createSignal<"home" | "onboard" | "preview" | "workflow">("home")
   const [workflowEventBus, setWorkflowEventBus] = createSignal<WorkflowEventBus | null>(null)
+  const [dryPreviewResult, setDryPreviewResult] = createSignal<DryPreviewResult | null>(null)
   const [templateTracks, setTemplateTracks] = createSignal<TracksConfig | null>(null)
   const [templateConditionGroups, setTemplateConditionGroups] = createSignal<ConditionGroup[] | null>(null)
   const [initialProjectName, setInitialProjectName] = createSignal<string | null>(null)
@@ -216,12 +224,65 @@ export function App(props: { initialToast?: InitialToast }) {
       console.error("Failed pre-flight check:", error)
     }
 
-    // No onboarding needed - start workflow directly
-    otel_debug(LOGGER_NAMES.TUI, '[AppShell] Starting workflow execution directly', [])
-    startWorkflowExecution()
+    // No onboarding needed - run dry preview
+    otel_debug(LOGGER_NAMES.TUI, '[AppShell] Running dry preview', [])
+    await showDryPreview({ cwd })
   }
 
-  const startWorkflowExecution = () => {
+  const showDryPreview = async (options: { cwd: string }) => {
+    try {
+      const result = await dryPreview({ cwd: options.cwd })
+      const launchOpts = getTUILaunchOptions()
+      setDryPreviewResult(result)
+
+      if (launchOpts?.skipPreview) {
+        otel_debug(LOGGER_NAMES.TUI, '[AppShell] --no-preview flag provided, skipping preview confirmation', [])
+        if (result.valid) {
+          const confirmed = { ...result, confirmed: true as const, confirmedBy: 'flag' as const }
+          startWorkflowExecution(confirmed)
+        } else {
+          toast.show({ variant: 'error', message: 'Dry preview has errors', duration: 5000 })
+          currentView = 'home'
+          setView('home')
+        }
+        return
+      }
+
+      if (launchOpts?.yes && result.valid) {
+        otel_debug(LOGGER_NAMES.TUI, '[AppShell] --yes flag provided, auto-confirming valid preview', [])
+        const confirmed = { ...result, confirmed: true as const, confirmedBy: 'flag' as const }
+        startWorkflowExecution(confirmed)
+        return
+      }
+
+      currentView = 'preview'
+      setView('preview')
+    } catch (error) {
+      otel_debug(LOGGER_NAMES.TUI, '[AppShell] Dry preview failed: %s', [error])
+      toast.show({ variant: 'error', message: `Dry preview failed: ${error instanceof Error ? error.message : String(error)}`, duration: 5000 })
+      currentView = 'home'
+      setView('home')
+    }
+  }
+
+  const handleDryPreviewConfirm = () => {
+    const result = dryPreviewResult()
+    otel_debug(LOGGER_NAMES.TUI, '[AppShell] Dry preview confirmed, starting workflow', [])
+    if (result && result.valid) {
+      const confirmed = { ...result, confirmed: true as const, confirmedBy: 'user' as const }
+      startWorkflowExecution(confirmed)
+    } else {
+      toast.show({ variant: "error", message: "Cannot start: dry preview has errors", duration: 5000 })
+    }
+  }
+
+  const handleDryPreviewCancel = () => {
+    otel_debug(LOGGER_NAMES.TUI, '[AppShell] Dry preview cancelled', [])
+    currentView = "home"
+    setView("home")
+  }
+
+  const startWorkflowExecution = (confirmedPreview?: { confirmed: true; valid: boolean; templateName: string; templatePath: string; confirmedBy: string; [key: string]: unknown }) => {
     otel_debug(LOGGER_NAMES.TUI, '[AppShell] startWorkflowExecution called', [])
     const eventBus = new WorkflowEventBus()
     setWorkflowEventBus(eventBus)
@@ -235,7 +296,10 @@ export function App(props: { initialToast?: InitialToast }) {
     pendingWorkflowStart = () => {
       otel_debug(LOGGER_NAMES.TUI, '[AppShell] Importing and running workflow', [])
       import("../../workflows/run.js").then(({ runWorkflow }) => {
-        runWorkflow({ cwd }).catch((error) => {
+        runWorkflow({
+          cwd,
+          ...(confirmedPreview ? { previewConfirmed: confirmedPreview } : {}),
+        }).catch((error) => {
           // Error is already handled by workflow:error event (shows ErrorModal)
           // Just log it here for debugging - no need to show toast
           const errorMsg = error instanceof Error ? error.message : String(error)
@@ -253,23 +317,19 @@ export function App(props: { initialToast?: InitialToast }) {
     const cwd = process.env.CODEMACHINE_CWD || process.cwd()
     const cmRoot = path.join(cwd, '.codemachine')
 
-    // Save project name if provided
     if (result.projectName) {
       await setProjectName(cmRoot, result.projectName)
     }
 
-    // Save selected track if provided
     if (result.trackId) {
       await setSelectedTrack(cmRoot, result.trackId)
     }
 
-    // Always save selected conditions (even if empty array)
     if (result.conditions !== undefined) {
       await setSelectedConditions(cmRoot, result.conditions)
     }
 
-    // Start workflow
-    startWorkflowExecution()
+    await showDryPreview({ cwd })
   }
 
   const handleOnboardCancel = () => {
@@ -371,6 +431,13 @@ export function App(props: { initialToast?: InitialToast }) {
               onCancel={handleOnboardCancel}
               eventBus={onboardingEventBus() ?? undefined}
               service={onboardingService() ?? undefined}
+            />
+          </Match>
+          <Match when={view() === "preview" && dryPreviewResult()}>
+            <DryPreview
+              result={dryPreviewResult()!}
+              onConfirm={handleDryPreviewConfirm}
+              onCancel={handleDryPreviewCancel}
             />
           </Match>
           <Match when={view() === "workflow"}>

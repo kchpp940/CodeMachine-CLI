@@ -231,45 +231,6 @@ export class StepIndexManager {
     await writeTrackingData(trackingPath, data);
   }
 
-  /**
-   * Marks a step as failed (unrecoverable)
-   * Writes failedAt and error to step data, removes from notCompletedSteps.
-   * Unlike stepCompleted, this marks the step as failed and not recoverable.
-   */
-  async stepFailed(stepIndex: number, error: string): Promise<void> {
-    logLifecycle(StepLifecyclePhase.FAILED, stepIndex, {
-      failedAt: new Date().toISOString(),
-      error,
-    });
-
-    const { data, trackingPath } = await readTrackingData(this.cmRoot);
-    const completedSteps = data.completedSteps ?? {};
-    const key = String(stepIndex);
-
-    // Get or create step data
-    if (!completedSteps[key]) {
-      completedSteps[key] = {
-        sessionId: '',
-        monitoringId: 0,
-      };
-    }
-
-    // Mark as failed
-    completedSteps[key].failedAt = new Date().toISOString();
-    completedSteps[key].error = error;
-    // Remove completedChains - no longer needed
-    delete completedSteps[key].completedChains;
-
-    data.completedSteps = completedSteps;
-
-    // Remove from notCompletedSteps
-    if (data.notCompletedSteps) {
-      data.notCompletedSteps = data.notCompletedSteps.filter((idx) => idx !== stepIndex);
-    }
-
-    await writeTrackingData(trackingPath, data);
-  }
-
   // ============================================
   // Query Methods
   // ============================================
@@ -335,9 +296,8 @@ export class StepIndexManager {
     logResume('notCompletedSteps is empty');
 
     // Check completedSteps - start after the last completed
-    // Note: Failed steps (failedAt) are excluded - they are not "completed"
     const completedIndices = Object.entries(completedSteps)
-      .filter(([_, stepData]) => stepData.completedAt !== undefined && stepData.failedAt === undefined)
+      .filter(([_, stepData]) => stepData.completedAt !== undefined)
       .map(([key]) => parseInt(key, 10));
 
     if (completedIndices.length > 0) {
@@ -374,11 +334,11 @@ export class StepIndexManager {
   }
 
   /**
-   * Checks if a specific step is fully completed (not failed)
+   * Checks if a specific step is fully completed
    */
   async isStepCompleted(stepIndex: number): Promise<boolean> {
     const stepData = await this.getStepData(stepIndex);
-    return stepData?.completedAt !== undefined && stepData?.failedAt === undefined;
+    return stepData?.completedAt !== undefined;
   }
 
   /**
@@ -389,7 +349,7 @@ export class StepIndexManager {
     const completedSteps = data.completedSteps ?? {};
 
     const result = Object.entries(completedSteps)
-      .filter(([_, stepData]) => stepData.completedAt !== undefined && stepData.failedAt === undefined)
+      .filter(([_, stepData]) => stepData.completedAt !== undefined)
       .map(([key]) => parseInt(key, 10))
       .sort((a, b) => a - b);
 

@@ -107,6 +107,26 @@ export type ModuleName = ModuleStep['agentId'];
 export interface RunWorkflowOptions {
   cwd?: string;
   templatePath?: string;
+  /**
+   * Dry preview confirmation mode:
+   * - 'interactive': prompt user for confirmation (default in TTY)
+   * - 'yes': auto-confirm (requires explicit --yes flag)
+   * - 'no': auto-reject (default in non-TTY)
+   */
+  confirm?: 'interactive' | 'yes' | 'no';
+  /** @deprecated Use `confirm: 'yes'` */
+  yes?: boolean;
+  /**
+   * Already-confirmed preview result (from TUI or previous runDryPreviewCLI call).
+   * If provided, skips preview and confirmation entirely.
+   */
+  previewConfirmed?: {
+    confirmed: true;
+    valid: boolean;
+    templateName: string;
+    templatePath: string;
+    [key: string]: unknown;
+  };
 }
 
 export interface TaskManagerOptions {

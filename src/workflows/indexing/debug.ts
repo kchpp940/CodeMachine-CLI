@@ -82,7 +82,7 @@ export function logDebug(category: string, message: string, data?: Record<string
 export function logStepData(stepIndex: number, stepData: StepData | null): void {
   if (stepData) {
     baseDebug(
-      `[Indexing:stepData] stepIndex=${stepIndex} sessionId=${stepData.sessionId} monitoringId=${stepData.monitoringId} completedChains=${JSON.stringify(stepData.completedChains)} completedAt=${stepData.completedAt} failedAt=${stepData.failedAt} error=${stepData.error ?? ''}`
+      `[Indexing:stepData] stepIndex=${stepIndex} sessionId=${stepData.sessionId} monitoringId=${stepData.monitoringId} completedChains=${JSON.stringify(stepData.completedChains)} completedAt=${stepData.completedAt}`
     );
   } else {
     baseDebug(`[Indexing:stepData] stepIndex=${stepIndex} data=null`);

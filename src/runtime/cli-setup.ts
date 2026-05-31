@@ -376,6 +376,8 @@ export async function runCodemachineCli(argv: string[] = process.argv): Promise<
         .version(VERSION)
         .description('Codemachine multi-agent CLI orchestrator')
         .option('-d, --dir <path>', 'Target workspace directory', process.cwd())
+        .option('-y, --yes', 'Auto-confirm dry preview (required in non-interactive environments)')
+        .option('--no-preview', 'Skip dry preview confirmation (dangerous, only for trusted environments)')
         // TODO: Move spec path handling to template level
         // .option('--spec <path>', 'Path to the planning specification file', DEFAULT_SPEC_PATH)
         .action(async (options) => {
@@ -398,7 +400,7 @@ export async function runCodemachineCli(argv: string[] = process.argv): Promise<
           });
 
           // Launch TUI - use startManualSpanAsync for proper nesting under cli.boot
-          const { result: startTUI, span: tuiSpan } = await startManualSpanAsync(cliTracer, 'cli.boot.tui_launcher_import', async (tuiSpan) => {
+          const { result: launchTUI, span: tuiSpan } = await startManualSpanAsync(cliTracer, 'cli.boot.tui_launcher_import', async (tuiSpan) => {
             const tuiStartTime = performance.now();
             otel_info(LOGGER_NAMES.TUI, 'Loading TUI launcher...', []);
             const { startTUI: tuiLauncher } = await import('../cli/tui/launcher.js');
@@ -416,7 +418,7 @@ export async function runCodemachineCli(argv: string[] = process.argv): Promise<
             bootSpan.setAttribute('cli.boot.duration_ms', bootDurationPreTui);
             otel_info(LOGGER_NAMES.BOOT, 'Boot duration (pre-TUI): %dms', [Math.round(bootDurationPreTui)]);
 
-            return tuiLauncher;
+            return { tuiLauncher, cliOptions: { yes: options.yes === true, skipPreview: options.preview === false } };
           });
 
           // End boot-related spans BEFORE blocking on TUI session
@@ -424,7 +426,12 @@ export async function runCodemachineCli(argv: string[] = process.argv): Promise<
           endBootSpan();
 
           try {
-            await startTUI();
+            await launchTUI.tuiLauncher(
+              false,
+              undefined,
+              undefined,
+              launchTUI.cliOptions,
+            );
 
             // Clear main buffer after TUI exits (removes splash from scrollback)
             if (splashShown && process.stdout.isTTY) {

@@ -20,11 +20,6 @@ export function getStepPhase(stepData: StepData | null): StepLifecyclePhase {
     return StepLifecyclePhase.COMPLETED;
   }
 
-  // If failedAt is set, step permanently failed (unrecoverable)
-  if (stepData.failedAt) {
-    return StepLifecyclePhase.FAILED;
-  }
-
   // If completedChains exists and has entries, step has chained prompts in progress
   if (stepData.completedChains && stepData.completedChains.length > 0) {
     return StepLifecyclePhase.CHAIN_IN_PROGRESS;
@@ -41,37 +36,20 @@ export function getStepPhase(stepData: StepData | null): StepLifecyclePhase {
 
 /**
  * Checks if a step is considered complete (has completedAt set)
- * Note: A failed step is NOT considered complete - use isStepFailed() for that.
  */
 export function isStepComplete(stepData: StepData | null): boolean {
   return stepData?.completedAt !== undefined;
 }
 
 /**
- * Checks if a step has permanently failed (has failedAt set)
- */
-export function isStepFailed(stepData: StepData | null): boolean {
-  return stepData?.failedAt !== undefined;
-}
-
-/**
- * Checks if a step has reached a terminal state (completed or failed)
- */
-export function isStepTerminal(stepData: StepData | null): boolean {
-  return isStepComplete(stepData) || isStepFailed(stepData);
-}
-
-/**
  * Checks if a step has incomplete chains (started chains but not fully completed)
- * Failed steps are excluded - they are not resumable.
  */
 export function hasIncompleteChains(stepData: StepData | null): boolean {
   if (!stepData) return false;
   return (
     stepData.completedChains !== undefined &&
     stepData.completedChains.length > 0 &&
-    stepData.completedAt === undefined &&
-    stepData.failedAt === undefined
+    stepData.completedAt === undefined
   );
 }
 
@@ -86,9 +64,9 @@ export function getNextChainIndex(stepData: StepData | null): number {
 }
 
 /**
- * Checks if a step is resumable (has session data but not completed or failed)
+ * Checks if a step is resumable (has session data but not completed)
  */
 export function isStepResumable(stepData: StepData | null): boolean {
   if (!stepData) return false;
-  return !!stepData.sessionId && !stepData.completedAt && !stepData.failedAt;
+  return !!stepData.sessionId && !stepData.completedAt;
 }

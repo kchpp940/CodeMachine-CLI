@@ -20,11 +20,7 @@ import { useWorkflowHandlers } from "./use-workflow-handlers"
 import { useWorkflowComputed } from "./use-workflow-computed"
 import { calculateVisibleItems } from "../constants"
 import { debug } from "../../../../../shared/logging/logger.js"
-import { AgentMonitorService, StatusService } from "../../../../../agents/monitoring/index.js"
 import type { WorkflowEventBus } from "../../../../../workflows/events/index.js"
-import { exec } from "child_process"
-import type { AgentState, SubAgentState } from "../state/types"
-import { StepLifecyclePhase } from "../../../../../../workflows/indexing/types.js"
 
 export interface UseWorkflowShellOptions {
   version: string
@@ -164,116 +160,6 @@ export function useWorkflowShell(options: UseWorkflowShellOptions) {
     return undefined
   }
 
-  const handleDiagnosticContinue = async (agentId: string) => {
-    const mid = getMonitoringId(agentId)
-    if (mid === undefined) {
-      showToast("error", "Cannot resume: no monitoring ID found", 3000)
-      return
-    }
-
-    const s = state()
-    const mainAgent = s.agents.find((a) => a.id === agentId)
-    let subAgent: SubAgentState | undefined
-    if (!mainAgent) {
-      for (const subs of s.subAgents.values()) {
-        const found = subs.find((sa) => sa.id === agentId)
-        if (found) {
-          subAgent = found
-          break
-        }
-      }
-    }
-    const agent: AgentState | SubAgentState | undefined = mainAgent ?? subAgent
-    if (!agent) {
-      showToast("error", "Agent not found in UI registry", 3000)
-      return
-    }
-
-    const monitor = AgentMonitorService.getInstance()
-    const record = monitor.getAgent(mid)
-
-    // Block CONTINUE for FAILED steps - check both UI status and monitoring record
-    if (agent.status === "failed" || record?.status === "failed") {
-      const errMsg = agent.error || record?.error || "Step has failed"
-      showToast("error", `Cannot continue: step has failed (${errMsg})`, 5000)
-      return
-    }
-
-    // Block CONTINUE for RUNNING steps
-    if (agent.status === "running" || record?.status === "running") {
-      showToast("info", "Step is currently running — cannot resume", 3000)
-      return
-    }
-
-    // Only allow CONTINUE for paused or awaiting steps WITH a sessionId
-    if (agent.status === "paused" || agent.status === "awaiting") {
-      if (!record?.sessionId) {
-        showToast("warning", "Cannot resume: no active session available", 3000)
-        return
-      }
-      ;(process as NodeJS.EventEmitter).emit("workflow:input", { prompt: "" })
-      showToast("info", `Resuming ${agent.name}...`, 3000)
-      return
-    }
-
-    showToast("warning", `Cannot resume agent in '${agent.status}' state`, 3000)
-  }
-
-  const handleDiagnosticMarkFailed = (agentId: string) => {
-    const mid = getMonitoringId(agentId)
-    if (mid === undefined) {
-      showToast("error", "Cannot mark failed: no monitoring ID found", 3000)
-      return
-    }
-
-    ;(process as NodeJS.EventEmitter).emit("workflow:mark-failed", { agentId, monitoringId: mid })
-    showToast("warning", `Marking agent ${agentId} as failed...`, 3000)
-  }
-
-  const handleDiagnosticOpenLog = (agentId: string) => {
-    const mid = getMonitoringId(agentId)
-    if (mid === undefined) {
-      showToast("error", "Cannot open log: no monitoring ID found", 3000)
-      return
-    }
-
-    const monitor = AgentMonitorService.getInstance()
-    const record = monitor.getAgent(mid)
-    if (!record?.logPath) {
-      showToast("error", "Log file path not found for this agent", 3000)
-      return
-    }
-
-    const fs = require("fs")
-    const path = require("path")
-    const fullLogPath = path.resolve(process.cwd(), record.logPath)
-
-    if (!fs.existsSync(fullLogPath)) {
-      showToast("error", `Log file not found: ${fullLogPath}`, 5000)
-      return
-    }
-
-    const platform = process.platform
-    let openCommand: string
-    if (platform === "darwin") {
-      openCommand = `open "${fullLogPath}"`
-    } else if (platform === "win32") {
-      openCommand = `start "" "${fullLogPath}"`
-    } else {
-      openCommand = `xdg-open "${fullLogPath}"`
-    }
-
-    exec(openCommand, (err) => {
-      if (err) {
-        debug('[Diagnostic] Error opening log file: %s', err.message)
-        modals.setLogViewerAgentId(agentId)
-        showToast("info", `Opened log viewer for ${agentId} (system open failed)`, 3000)
-      } else {
-        showToast("success", `Opened log in default editor: ${record.logPath}`, 3000)
-      }
-    })
-  }
-
   // Keyboard navigation
   useWorkflowKeyboard({
     getState: state,
@@ -325,13 +211,7 @@ export function useWorkflowShell(options: UseWorkflowShellOptions) {
     toggleAutonomousMode: handlers.toggleAutonomousMode,
     showControllerContinue: () => handlers.setShowControllerContinueModal(true),
     hasController: () => !!state().controllerState,
-    returnToController: handlers.returnToController,
-    toggleDiagnosticPanel: () => ui.actions.toggleDiagnosticPanel(),
-    isDiagnosticPanelVisible: () => state().diagnosticPanelVisible,
-    diagnosticContinue: handleDiagnosticContinue,
-    diagnosticMarkFailed: handleDiagnosticMarkFailed,
-    diagnosticOpenLog: handleDiagnosticOpenLog,
-    showToast: (type, message, duration) => showToast(type, message, duration),
+    returnToController: handlers.returnToController
   })
 
   return {
@@ -365,11 +245,6 @@ export function useWorkflowShell(options: UseWorkflowShellOptions) {
     // Layout helpers
     showOutputPanel,
     getVisibleItems,
-    getMonitoringId,
-
-    // Diagnostic panel
-    handleDiagnosticContinue,
-    handleDiagnosticMarkFailed,
-    handleDiagnosticOpenLog
+    getMonitoringId
   }
 }

@@ -7,6 +7,11 @@ export const metadata: EngineMetadata = {
   cliCommand: 'auggie',
   cliBinary: 'auggie',
   installCommand: 'npm install -g @augmentcode/auggie',
+  capabilities: {
+    supportsReasoningEffort: false,
+    supportsResume: false,
+    supportsModelOverride: false,
+  },
   order: 6,
 };
 

@@ -13,7 +13,7 @@ import type { StepIndexManager } from '../../indexing/index.js';
 /**
  * Supported signal types
  */
-export type SignalType = 'pause' | 'skip' | 'stop' | 'mode-change' | 'mark-failed';
+export type SignalType = 'pause' | 'skip' | 'stop' | 'mode-change';
 
 /**
  * Input mode - determines where input comes from

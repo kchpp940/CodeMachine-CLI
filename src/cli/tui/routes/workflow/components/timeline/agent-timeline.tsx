@@ -15,33 +15,24 @@ import { MainAgentNode } from "./main-agent-node"
 import { SubAgentSummary } from "./sub-agent-summary"
 import { SubAgentNode } from "./sub-agent-node"
 import { SeparatorNode } from "./separator-node"
-import { DiagnosticPanel } from "./diagnostic-panel"
 
 export interface AgentTimelineProps {
   state: WorkflowState
   onToggleExpand: (agentId: string) => void
-  onContinue: (agentId: string) => void
-  onMarkFailed: (agentId: string) => void
-  onOpenLog: (agentId: string) => void
   availableHeight?: number
   availableWidth?: number
   isPromptBoxFocused?: boolean
 }
 
-const TIMELINE_HEADER_HEIGHT = 2
-const DIAGNOSTIC_PANEL_HEADER_HEIGHT = 1
+const TIMELINE_HEADER_HEIGHT = 2 // Header text + padding
 const MIN_VIEWPORT_HEIGHT = 1
 
 export function AgentTimeline(props: AgentTimelineProps) {
   const themeCtx = useTheme()
 
-  const showDiagnostic = () => props.state.diagnosticPanelVisible
-
-  const diagnosticPanelHeight = () => showDiagnostic() ? DIAGNOSTIC_PANEL_HEADER_HEIGHT : 0
-
   const viewportHeight = () => {
     const height = props.availableHeight ?? 10
-    return Math.max(MIN_VIEWPORT_HEIGHT, height - TIMELINE_HEADER_HEIGHT - diagnosticPanelHeight())
+    return Math.max(MIN_VIEWPORT_HEIGHT, height - TIMELINE_HEADER_HEIGHT)
   }
 
   // Build navigation state for layout calculation
@@ -70,12 +61,14 @@ export function AgentTimeline(props: AgentTimelineProps) {
 
   return (
     <box flexDirection="column" width="100%">
+      {/* Header */}
       <box paddingLeft={1} paddingRight={1} paddingTop={1} paddingBottom={1}>
         <text fg={themeCtx.theme.text} attributes={1}>
           Workflow Pipeline{headerSuffix()}
         </text>
       </box>
 
+      {/* Timeline content with scrollbox */}
       <Show
         when={layout().length > 0}
         fallback={
@@ -94,10 +87,12 @@ export function AgentTimeline(props: AgentTimelineProps) {
             {(entry) => {
               const { item } = entry
 
+              // Main agent
               if (item.type === "main") {
                 return <MainAgentNode agent={item.agent} isSelected={isMainSelected(item.id)} availableWidth={props.availableWidth} />
               }
 
+              // Sub-agent summary (collapsed)
               if (item.type === "summary") {
                 const parentSubAgents = props.state.subAgents.get(item.parentId) || []
                 if (parentSubAgents.length === 0) return null
@@ -113,10 +108,12 @@ export function AgentTimeline(props: AgentTimelineProps) {
                 )
               }
 
+              // Separator (visual divider)
               if (item.type === "separator") {
                 return <SeparatorNode separator={item.separator} />
               }
 
+              // Sub-agent (expanded)
               if (item.type === "sub") {
                 return <SubAgentNode agent={item.agent} isSelected={isSubSelected(item.id)} />
               }
@@ -125,24 +122,6 @@ export function AgentTimeline(props: AgentTimelineProps) {
             }}
           </For>
         </scrollbox>
-      </Show>
-
-      <Show when={showDiagnostic()}>
-        <box
-          border={["top"]}
-          borderColor={themeCtx.theme.warning}
-          borderStyle="single"
-          marginTop={1}
-        >
-          <DiagnosticPanel
-            agents={props.state.agents}
-            subAgents={props.state.subAgents}
-            availableWidth={props.availableWidth}
-            onContinue={props.onContinue}
-            onMarkFailed={props.onMarkFailed}
-            onOpenLog={props.onOpenLog}
-          />
-        </box>
       </Show>
     </box>
   )

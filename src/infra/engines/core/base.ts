@@ -7,28 +7,25 @@ import type { EngineRunOptions, EngineRunResult } from './types.js';
 /**
  * Engine metadata - describes the engine for auto-discovery
  */
+export interface EngineCapabilities {
+  supportsReasoningEffort?: boolean;
+  supportsResume?: boolean;
+  supportsModelOverride?: boolean;
+  supportedModels?: string[];
+}
+
 export interface EngineMetadata {
-  /** Unique identifier for the engine (e.g., 'codex', 'claude') */
   id: string;
-  /** Display name (e.g., 'Codex', 'Claude') */
   name: string;
-  /** Description shown in UI (e.g., 'Authenticate with Claude AI') */
   description: string;
-  /** CLI command namespace (e.g., 'codex', 'claude') */
   cliCommand: string;
-  /** The actual CLI binary name to check/execute (e.g., 'codex', 'claude') */
   cliBinary: string;
-  /** Install command for the CLI (e.g., 'npm install -g @openai/codex') */
   installCommand: string;
-  /** Default model to use for this engine (e.g., 'gpt-5-codex', 'claude-sonnet-4.5') */
   defaultModel?: string;
-  /** Default reasoning effort for models that support it (only applies to engines like Codex) */
   defaultModelReasoningEffort?: 'low' | 'medium' | 'high';
-  /** Display order in UI (lower = first) */
+  capabilities?: EngineCapabilities;
   order?: number;
-  /** Whether this engine is experimental */
   experimental?: boolean;
-  /** Optional icon for UI */
   icon?: string;
 }
 
