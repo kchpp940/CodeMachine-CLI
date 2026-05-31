@@ -1,29 +1,31 @@
-export interface OpenCodeCommandOptions {
-  /**
-   * Provider/model identifier (e.g., anthropic/claude-3.7-sonnet)
-   */
-  model?: string;
-  /**
-   * Agent name to run (defaults to 'build')
-   */
+import type { ProviderCommandOptions, ProviderCommand } from '../../shared/commandUtils.js';
+import { validateAllOptions } from '../../shared/commandUtils.js';
+
+export interface OpenCodeCommandOptions extends ProviderCommandOptions {
   agent?: string;
-  /**
-   * Session ID to resume (uses -s flag)
-   */
-  resumeSessionId?: string;
 }
 
-export interface OpenCodeCommand {
-  command: string;
-  args: string[];
-}
+export type OpenCodeCommand = ProviderCommand;
 
-export function buildOpenCodeRunCommand(options: OpenCodeCommandOptions = {}): OpenCodeCommand {
+const MODEL_CONFIG = {
+  modelMap: {} as Record<string, string>,
+  validModels: [] as string[],
+  providerName: 'OpenCode',
+  modelSupport: 'supported' as const,
+};
+
+export function buildOpenCodeRunCommand(options: OpenCodeCommandOptions): OpenCodeCommand {
+  const validation = validateAllOptions(options, MODEL_CONFIG);
+  if (!validation.isValid) {
+    throw new Error(validation.error);
+  }
+
+  const { isResume } = validation;
+
   const args: string[] = ['run', '--format', 'json'];
 
-  // Add session resume flag if provided
-  if (options.resumeSessionId?.trim()) {
-    args.push('--session', options.resumeSessionId.trim());
+  if (isResume) {
+    args.push('--session', options.resumeSessionId!.trim());
   }
 
   const agentName = options.agent?.trim() || 'build';

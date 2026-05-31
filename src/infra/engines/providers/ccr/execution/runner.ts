@@ -113,12 +113,8 @@ function formatStreamJsonLine(line: string): string[] | null {
 export async function runCcr(options: RunCcrOptions): Promise<RunCcrResult> {
   const { prompt, workingDir, resumeSessionId, resumePrompt, model, env, onData, onErrorData, onSessionId, abortSignal, timeout = 1800000 } = options;
 
-  if (!prompt) {
+  if (!prompt && !resumeSessionId) {
     throw new Error('runCcr requires a prompt.');
-  }
-
-  if (!workingDir) {
-    throw new Error('runCcr requires a working directory.');
   }
 
   // Set up CCR_CONFIG_DIR for authentication
@@ -153,7 +149,7 @@ export async function runCcr(options: RunCcrOptions): Promise<RunCcrResult> {
     return result;
   };
 
-  const { command, args } = buildCcrExecCommand({ workingDir, resumeSessionId, model });
+  const { command, args } = buildCcrExecCommand({ workingDir, resumeSessionId, resumePrompt, model });
 
   logger.debug(`CCR runner - prompt length: ${prompt.length}, lines: ${prompt.split('\n').length}`);
   logger.debug(`CCR runner - args count: ${args.length}, model: ${model ?? 'default'}`);

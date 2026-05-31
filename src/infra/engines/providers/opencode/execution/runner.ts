@@ -148,16 +148,12 @@ export async function runOpenCode(options: RunOpenCodeOptions): Promise<RunOpenC
     timeout = 1800000,
   } = options;
 
-  if (!prompt) {
+  if (!prompt && !resumeSessionId) {
     throw new Error('runOpenCode requires a prompt.');
   }
 
-  if (!workingDir) {
-    throw new Error('runOpenCode requires a working directory.');
-  }
-
   const runnerEnv = resolveRunnerEnv(env);
-  const { command, args } = buildOpenCodeRunCommand({ model, agent, resumeSessionId });
+  const { command, args } = buildOpenCodeRunCommand({ workingDir, model, agent, resumeSessionId, resumePrompt });
 
   const runnerStartTime = Date.now();
   logger.debug(

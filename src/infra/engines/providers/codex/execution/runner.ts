@@ -213,15 +213,10 @@ function formatCodexStreamJsonLine(line: string): string | null {
 export async function runCodex(options: RunCodexOptions): Promise<RunCodexResult> {
   const { prompt, workingDir, resumeSessionId, resumePrompt, model, modelReasoningEffort, env, onData, onErrorData, onTelemetry, onSessionId, abortSignal, timeout = 1800000 } = options;
 
-  // DEBUG: Log resume parameters
   debug(`[DEBUG codex runner.ts] runCodex called with resumeSessionId=${resumeSessionId}, resumePrompt="${resumePrompt}"`);
 
-  if (!prompt) {
+  if (!prompt && !resumeSessionId) {
     throw new Error('runCodex requires a prompt.');
-  }
-
-  if (!workingDir) {
-    throw new Error('runCodex requires a working directory.');
   }
 
   // Prefer calling the real Codex CLI directly, mirroring runner-prompts spec

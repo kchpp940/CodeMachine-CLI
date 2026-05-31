@@ -32,4 +32,3 @@ export function buildAuggieRunCommand(options: AuggieCommandOptions = {}): Auggi
     args,
   };
 }
-

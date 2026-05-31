@@ -24,13 +24,7 @@ export {
   getImportInstallPath,
   isImportInstalled,
   getInstalledImportPaths,
-  getTempInstallPath,
-  getBackupInstallPath,
-  findBackupDirs,
-  scanImportDirs,
-  cleanupStaleDirs,
 } from './paths.js';
-export type { ScannedImportDir, ImportDirKind } from './paths.js';
 
 // Manifest parsing
 export {

@@ -176,12 +176,8 @@ function formatStreamJsonLine(line: string): string[] | null {
 export async function runCursor(options: RunCursorOptions): Promise<RunCursorResult> {
   const { prompt, workingDir, resumeSessionId, resumePrompt, model, env, onData, onErrorData, onSessionId, abortSignal, timeout = 1800000 } = options;
 
-  if (!prompt) {
+  if (!prompt && !resumeSessionId) {
     throw new Error('runCursor requires a prompt.');
-  }
-
-  if (!workingDir) {
-    throw new Error('runCursor requires a working directory.');
   }
 
   // Set up CURSOR_CONFIG_DIR for authentication
@@ -219,6 +215,7 @@ export async function runCursor(options: RunCursorOptions): Promise<RunCursorRes
   const { command, args } = buildCursorExecCommand({
     workingDir,
     resumeSessionId,
+    resumePrompt,
     model,
     cursorConfigDir
   });

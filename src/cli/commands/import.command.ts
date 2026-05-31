@@ -13,21 +13,22 @@
  */
 
 import type { Command } from 'commander';
-import { existsSync, rmSync } from 'node:fs';
-import chalk from 'chalk';
+import { existsSync, rmSync, cpSync } from 'node:fs';
+import { spawn } from 'node:child_process';
+import { join } from 'node:path';
 import {
+  resolveSource,
   extractRepoName,
+  ensureImportsDir,
   getImportInstallPath,
+  isImportInstalled,
+  validateImport,
+  parseManifest,
+  registerImport,
   unregisterImport,
   getAllInstalledImports,
   getInstalledImport,
-  installPackage,
-  findBackupDirs,
-  loadRegistry,
-  scanImportDirs,
-  parseManifest,
 } from '../../shared/imports/index.js';
-import type { ScannedImportDir } from '../../shared/imports/index.js';
 
 interface ImportCommandOptions {
   list?: boolean;
@@ -35,165 +36,194 @@ interface ImportCommandOptions {
   verbose?: boolean;
 }
 
-async function installImport(source: string, _verbose: boolean): Promise<void> {
+/**
+ * Clone a git repository
+ */
+async function cloneRepo(
+  url: string,
+  destPath: string,
+  verbose: boolean
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const args = ['clone', '--depth', '1', url, destPath];
+
+    if (verbose) {
+      console.log(`  Running: git ${args.join(' ')}`);
+    }
+
+    const proc = spawn('git', args, {
+      stdio: verbose ? 'inherit' : 'pipe',
+    });
+
+    let stderr = '';
+
+    if (!verbose && proc.stderr) {
+      proc.stderr.on('data', (data: Buffer) => {
+        stderr += data.toString();
+      });
+    }
+
+    proc.on('close', (code: number | null) => {
+      if (code === 0) {
+        resolve();
+      } else {
+        reject(new Error(`git clone failed with code ${code}: ${stderr}`));
+      }
+    });
+
+    proc.on('error', (err: Error) => {
+      reject(new Error(`Failed to run git: ${err.message}`));
+    });
+  });
+}
+
+/**
+ * Remove .git directory from cloned repo
+ */
+function removeGitDir(repoPath: string): void {
+  const gitDir = join(repoPath, '.git');
+  if (existsSync(gitDir)) {
+    rmSync(gitDir, { recursive: true, force: true });
+  }
+}
+
+/**
+ * Copy a local folder to the imports directory
+ */
+function copyLocalFolder(
+  sourcePath: string,
+  destPath: string,
+  verbose: boolean
+): void {
+  if (verbose) {
+    console.log(`  Copying from: ${sourcePath}`);
+    console.log(`  Copying to: ${destPath}`);
+  }
+
+  cpSync(sourcePath, destPath, { recursive: true });
+
+  // Remove .git directory if present in the copied folder
+  removeGitDir(destPath);
+}
+
+/**
+ * Install an import from a source
+ */
+async function installImport(source: string, verbose: boolean): Promise<void> {
   console.log(`\nResolving source: ${source}`);
 
-  const result = await installPackage(source);
+  // Resolve the source to a clone URL
+  const resolved = await resolveSource(source);
 
-  if (result.success) {
-    console.log(`\n✅ Successfully installed: ${result.name} v${result.version}`);
-    console.log(`   Location: ${result.location}`);
+  if (verbose) {
+    console.log(`  Type: ${resolved.type}`);
+    console.log(`  URL: ${resolved.url}`);
+    console.log(`  Repo: ${resolved.repoName}`);
+    if (resolved.owner) {
+      console.log(`  Owner: ${resolved.owner}`);
+    }
+  }
+
+  const installPath = getImportInstallPath(resolved.repoName);
+
+  // Check if already installed
+  if (isImportInstalled(resolved.repoName)) {
+    console.log(`\nUpdating existing import: ${resolved.repoName}`);
+    // Remove existing installation
+    rmSync(installPath, { recursive: true, force: true });
   } else {
-    console.error(`\n❌ Installation failed: ${result.error}`);
-    if (result.errorDetails) {
-      console.error(`   Details: ${result.errorDetails}`);
-    }
-    if (result.rolledBack) {
-      console.log(chalk.yellow('   Previous version has been restored automatically.'));
-    }
-    throw new Error(result.error);
+    console.log(`\nInstalling: ${resolved.repoName}`);
   }
-}
 
-function repoNameFromPath(path: string): string {
-  return path.split('/').pop() ?? path;
-}
+  // Ensure imports directory exists
+  ensureImportsDir();
 
-function findRegistryEntryByName(name: string): { name: string; path: string } | null {
-  const registry = loadRegistry();
-  for (const [regName, imp] of Object.entries(registry.imports)) {
-    if (regName === name || imp.path.endsWith(`/${name}`)) {
-      return { name: regName, path: imp.path };
-    }
+  // Handle local paths vs git URLs
+  if (resolved.type === 'local-path') {
+    console.log('  Copying local folder...');
+    copyLocalFolder(resolved.url, installPath, verbose);
+  } else {
+    // Clone the repository
+    console.log('  Cloning repository...');
+    await cloneRepo(resolved.url, installPath, verbose);
+
+    // Remove .git directory (we don't need version control for imports)
+    removeGitDir(installPath);
   }
-  return null;
+
+  // Validate the import
+  console.log('  Validating...');
+  const validation = validateImport(installPath);
+
+  if (!validation.valid) {
+    // Invalid import, remove it
+    rmSync(installPath, { recursive: true, force: true });
+    console.error('\n❌ Validation failed:');
+    validation.errors.forEach((err) => console.error(`   - ${err}`));
+    throw new Error('Import validation failed');
+  }
+
+  // Show warnings if any
+  if (validation.warnings.length > 0) {
+    console.log('\n⚠️  Warnings:');
+    validation.warnings.forEach((warn) => console.log(`   - ${warn}`));
+  }
+
+  // Register the import
+  const manifest = parseManifest(installPath);
+  if (!manifest) {
+    rmSync(installPath, { recursive: true, force: true });
+    throw new Error('Failed to parse manifest after validation');
+  }
+
+  registerImport(resolved.repoName, manifest, source);
+
+  console.log(`\n✅ Successfully installed: ${manifest.name} v${manifest.version}`);
+  console.log(`   Location: ${installPath}`);
 }
 
+/**
+ * Remove an installed import
+ */
 async function removeImport(name: string): Promise<void> {
-  console.log(`\nLooking for import or artifacts matching: ${name}`);
+  // Try to find by package name first
+  let installed = getInstalledImport(name);
 
-  let removedSomething = false;
-  let messages: string[] = [];
-
-  // 1. Find by registry entry first
-  const regEntry = findRegistryEntryByName(name);
-  if (regEntry) {
-    const repoName = repoNameFromPath(regEntry.path);
-
-    // Remove main directory
-    if (existsSync(regEntry.path)) {
-      rmSync(regEntry.path, { recursive: true, force: true });
-      messages.push(`Removed main directory: ${regEntry.path}`);
-      removedSomething = true;
-    }
-
-    // Remove backups for this repo
-    const backups = findBackupDirs(repoName);
-    for (const backup of backups) {
-      rmSync(backup, { recursive: true, force: true });
-      messages.push(`Removed backup: ${backup}`);
-      removedSomething = true;
-    }
-
-    // Remove from registry
-    unregisterImport(regEntry.name);
-    messages.push(`Unregistered from registry: ${regEntry.name}`);
-    removedSomething = true;
-  }
-
-  // 2. If no registry entry, try matching by repoName to orphaned backups/broken dirs
-  if (!removedSomething) {
-    const scanned = scanImportDirs();
-    const matching = scanned.filter(
-      (d) => d.name === name || d.path.endsWith(`/${name}`)
+  // If not found, try to find by repo name
+  if (!installed) {
+    const allImports = getAllInstalledImports();
+    installed = allImports.find(
+      (imp) => imp.path.endsWith(name) || imp.path.endsWith(`/${name}`)
     );
-
-    for (const dir of matching) {
-      rmSync(dir.path, { recursive: true, force: true });
-      messages.push(`Removed ${dir.kind} directory: ${dir.path}`);
-      removedSomething = true;
-    }
   }
 
-  // 3. Also try removing registry orphan if name matches
-  if (!removedSomething) {
-    const registry = loadRegistry();
-    if (registry.imports[name]) {
-      unregisterImport(name);
-      messages.push(`Removed orphan registry entry: ${name}`);
-      removedSomething = true;
-    }
-  }
-
-  if (!removedSomething) {
-    console.error(`\n❌ No import or artifacts found matching: ${name}`);
-    console.log('Use "codemachine import --list" to see all imports and artifacts.');
+  if (!installed) {
+    console.error(`\n❌ Import not found: ${name}`);
+    console.log('\nUse "codemachine import --list" to see installed imports.');
     return;
   }
 
-  for (const msg of messages) {
-    console.log(`   ${msg}`);
+  console.log(`\nRemoving: ${installed.name}`);
+
+  // Remove from filesystem
+  if (existsSync(installed.path)) {
+    rmSync(installed.path, { recursive: true, force: true });
   }
-  console.log(`\n✅ Cleanup complete for: ${name}`);
+
+  // Unregister
+  unregisterImport(installed.name);
+
+  console.log(`✅ Successfully removed: ${installed.name}`);
 }
 
+/**
+ * List all installed imports
+ */
 function listImports(): void {
-  const registry = loadRegistry();
-  const scanned = scanImportDirs();
+  const imports = getAllInstalledImports();
 
-  // Group by repo name
-  const byRepo = new Map<string, {
-    complete?: ScannedImportDir;
-    backups: ScannedImportDir[];
-    broken: ScannedImportDir[];
-    temp: ScannedImportDir[];
-    registryName?: string;
-    registryPath?: string;
-    hasRegistryButNoDir: boolean;
-  }>();
-
-  // Helper to get or create entry
-  const getOrCreate = (repoName: string) => {
-    let entry = byRepo.get(repoName);
-    if (!entry) {
-      entry = { backups: [], broken: [], temp: [], hasRegistryButNoDir: false };
-      byRepo.set(repoName, entry);
-    }
-    return entry;
-  };
-
-  // Add scanned directories
-  for (const dir of scanned) {
-    const repoName = dir.kind === 'complete' ? repoNameFromPath(dir.path) : dir.name;
-    const entry = getOrCreate(repoName);
-
-    if (dir.kind === 'complete') {
-      entry.complete = dir;
-    } else if (dir.kind === 'backup') {
-      entry.backups.push(dir);
-    } else if (dir.kind === 'broken') {
-      entry.broken.push(dir);
-    } else if (dir.kind === 'temp') {
-      entry.temp.push(dir);
-    }
-  }
-
-  // Add registry entries and detect orphans
-  for (const [regName, imp] of Object.entries(registry.imports)) {
-    const repoName = repoNameFromPath(imp.path);
-    const entry = getOrCreate(repoName);
-    entry.registryName = regName;
-    entry.registryPath = imp.path;
-
-    // Check if path exists with manifest (registry orphan if not)
-    if (!existsSync(imp.path) || !parseManifest(imp.path)) {
-      entry.hasRegistryButNoDir = true;
-    }
-  }
-
-  // If nothing at all, show help
-  if (byRepo.size === 0) {
-    console.log('\nNo imports or artifacts found.');
+  if (imports.length === 0) {
+    console.log('\nNo imports installed.');
     console.log(`\nTo install an import, use:`);
     console.log(`  codemachine import <package-name>`);
     console.log(`  codemachine import <owner>/<repo>`);
@@ -202,73 +232,34 @@ function listImports(): void {
     return;
   }
 
-  // Render
-  console.log('\nImports and artifacts:\n');
+  console.log('\nInstalled imports:\n');
 
-  let completeCount = 0;
-  let problemCount = 0;
-
-  byRepo.forEach((entry, repoName) => {
-    const manifest = entry.complete ? parseManifest(entry.complete.path) : null;
-    const displayName = entry.registryName ?? manifest?.name ?? repoName;
-
-    if (entry.complete && manifest) {
-      completeCount++;
-      console.log(`  ${chalk.green(displayName)} ${manifest.version ? `v${manifest.version}` : ''}`);
-      console.log(`    Path: ${entry.complete.path}`);
-    } else if (entry.registryName) {
-      problemCount++;
-      console.log(`  ${chalk.red(displayName)} (registry entry only — directory missing/corrupted)`);
-      console.log(`    Path: ${entry.registryPath}`);
-      console.log(chalk.red('    ⚠  Registry entry exists but directory has no valid manifest'));
-    }
-
-    if (entry.backups.length > 0) {
-      problemCount++;
-      console.log(chalk.yellow(`    ⚠  ${entry.backups.length} recoverable backup(s) from failed update:`));
-      for (const b of entry.backups) {
-        console.log(chalk.yellow(`       ${b.path}`));
-      }
-    }
-
-    if (entry.broken.length > 0) {
-      problemCount++;
-      console.log(chalk.red(`    ⚠  ${entry.broken.length} incomplete/broken directory(ies):`));
-      for (const b of entry.broken) {
-        console.log(chalk.red(`       ${b.path}`));
-      }
-    }
-
-    if (entry.temp.length > 0) {
-      problemCount++;
-      console.log(chalk.gray(`    ⚠  ${entry.temp.length} stale temp directory(ies):`));
-      for (const t of entry.temp) {
-        console.log(chalk.gray(`       ${t.path}`));
-      }
-    }
-
+  for (const imp of imports) {
+    console.log(`  ${imp.name} v${imp.version}`);
+    console.log(`    Source: ${imp.source}`);
+    console.log(`    Path: ${imp.path}`);
+    console.log(`    Installed: ${new Date(imp.installedAt).toLocaleDateString()}`);
     console.log('');
-  });
-
-  const summaryParts: string[] = [`${completeCount} complete`];
-  if (problemCount > 0) summaryParts.push(`${problemCount} with issue(s)`);
-  console.log(`Total: ${summaryParts.join(', ')}`);
-
-  if (problemCount > 0) {
-    console.log(chalk.yellow('\n💡 Tip: Use "codemachine import --remove <name>" to clean up broken artifacts.'));
   }
+
+  console.log(`Total: ${imports.length} import(s)`);
 }
 
+/**
+ * Run the import command
+ */
 async function runImportCommand(
   source: string | undefined,
   options: ImportCommandOptions
 ): Promise<void> {
   try {
+    // List mode
     if (options.list) {
       listImports();
       return;
     }
 
+    // Remove mode
     if (options.remove) {
       if (!source) {
         console.error('❌ Please specify an import to remove.');
@@ -279,6 +270,7 @@ async function runImportCommand(
       return;
     }
 
+    // Install mode (default)
     if (!source) {
       console.error('❌ Please specify a source to import.');
       console.log('\nUsage:');
@@ -303,6 +295,9 @@ async function runImportCommand(
   }
 }
 
+/**
+ * Register the import command with Commander
+ */
 export function registerImportCommand(program: Command): void {
   program
     .command('import [source]')
