@@ -13,6 +13,8 @@ export interface ControllerOptions {
   engine?: string;
   /** Model override */
   model?: string;
+  /** Reasoning effort level (only engines that support it) */
+  modelReasoningEffort?: 'low' | 'medium' | 'high';
 }
 
 /**

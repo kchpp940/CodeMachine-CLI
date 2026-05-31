@@ -2,7 +2,10 @@
  * Base types and interfaces for the engine plugin system
  */
 
-import type { EngineRunOptions, EngineRunResult } from './types.js';
+import type { EngineRunOptions, EngineRunResult, EngineCapabilities, CapabilityRequest } from './types.js';
+
+export type { EngineCapabilities, CapabilityRequest } from './types.js';
+export { DEFAULT_CAPABILITIES, assertEngineCapabilities, capabilityErrorMessage } from './types.js';
 
 /**
  * Engine metadata - describes the engine for auto-discovery
@@ -24,6 +27,8 @@ export interface EngineMetadata {
   defaultModel?: string;
   /** Default reasoning effort for models that support it (only applies to engines like Codex) */
   defaultModelReasoningEffort?: 'low' | 'medium' | 'high';
+  /** Feature capabilities declared by this engine */
+  capabilities: EngineCapabilities;
   /** Display order in UI (lower = first) */
   order?: number;
   /** Whether this engine is experimental */

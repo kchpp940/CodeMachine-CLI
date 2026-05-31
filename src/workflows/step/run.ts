@@ -10,8 +10,9 @@ import { AgentMonitorService, StatusService } from '../../agents/monitoring/inde
 import type { StepOutput as StateStepOutput } from '../state/index.js';
 import { getUniqueAgentId } from '../context/index.js';
 import { executeStep } from './execute.js';
-import { selectEngine } from './engine.js';
+import { selectEngine, requiredCapabilitiesForStep } from './engine.js';
 import { registry } from '../../infra/engines/index.js';
+import { assertEngineCapabilities, DEFAULT_CAPABILITIES } from '../../infra/engines/core/types.js';
 import { getSelectedConditions, getSelectedTrack } from '../../shared/workflows/template.js';
 import { loadAgentConfig } from '../../agents/runner/index.js';
 import { loadChainedPrompts } from '../../agents/runner/chained.js';
@@ -104,13 +105,22 @@ export async function runStepFresh(ctx: RunnerContext): Promise<RunStepResult | 
   });
 
   // Determine and set engine
-  const engineType = await selectEngine(step, ctx.emitter, uniqueAgentId);
+  const engineType = await selectEngine(step, ctx.emitter, uniqueAgentId, requiredCapabilitiesForStep(step, false));
   step.engine = engineType;
   ctx.emitter.updateAgentEngine(uniqueAgentId, engineType);
 
-  // Resolve model
+  // Unified capability validation after engine selection
   const engineModule = registry.get(engineType);
-  const resolvedModel = step.model ?? engineModule?.metadata.defaultModel;
+  const engineCapabilities = engineModule?.metadata.capabilities;
+  assertEngineCapabilities(engineModule?.metadata.name ?? engineType, engineCapabilities ?? DEFAULT_CAPABILITIES, {
+    model: step.model,
+    modelReasoningEffort: step.modelReasoningEffort,
+  });
+
+  // Resolve model (only when the engine supports it)
+  const resolvedModel = engineCapabilities?.model
+    ? (step.model ?? engineModule?.metadata.defaultModel)
+    : undefined;
   if (resolvedModel) {
     ctx.emitter.updateAgentModel(uniqueAgentId, resolvedModel);
   }
@@ -301,13 +311,23 @@ export async function runStepResume(
 
   // Determine and set engine (with fallback if configured engine isn't authenticated)
   // This is critical for crash recovery when the original engine may no longer be available
-  const engineType = await selectEngine(step, ctx.emitter, uniqueAgentId);
+  const engineType = await selectEngine(step, ctx.emitter, uniqueAgentId, requiredCapabilitiesForStep(step, true));
   step.engine = engineType;
   ctx.emitter.updateAgentEngine(uniqueAgentId, engineType);
 
-  // Resolve model
+  // Unified capability validation after engine selection (resume path)
   const engineModule = registry.get(engineType);
-  const resolvedModel = step.model ?? engineModule?.metadata.defaultModel;
+  const engineCapabilities = engineModule?.metadata.capabilities;
+  assertEngineCapabilities(engineModule?.metadata.name ?? engineType, engineCapabilities ?? DEFAULT_CAPABILITIES, {
+    model: step.model,
+    modelReasoningEffort: step.modelReasoningEffort,
+    resumeSessionId: 'active',
+  });
+
+  // Resolve model (only when the engine supports it)
+  const resolvedModel = engineCapabilities?.model
+    ? (step.model ?? engineModule?.metadata.defaultModel)
+    : undefined;
   if (resolvedModel) {
     ctx.emitter.updateAgentModel(uniqueAgentId, resolvedModel);
   }

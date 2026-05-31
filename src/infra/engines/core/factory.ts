@@ -1,4 +1,4 @@
-import type { Engine, EngineType, EngineRunOptions, EngineRunResult } from './types.js';
+import type { Engine, EngineType, EngineRunOptions, EngineRunResult, EngineCapabilities } from './types.js';
 import type { EngineModule } from './base.js';
 import { registry } from './registry.js';
 
@@ -10,6 +10,10 @@ class DynamicEngine implements Engine {
 
   get type(): EngineType {
     return this.engineModule.metadata.id;
+  }
+
+  get capabilities(): EngineCapabilities {
+    return this.engineModule.metadata.capabilities;
   }
 
   async run(options: EngineRunOptions): Promise<EngineRunResult> {

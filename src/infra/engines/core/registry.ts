@@ -3,7 +3,9 @@
  */
 
 import type { EngineModule, EngineMetadata } from './base.js';
+import type { EngineCapabilities } from './types.js';
 import { isEngineModule } from './base.js';
+import { DEFAULT_CAPABILITIES } from './types.js';
 
 // Import all engines at compile time
 import codexEngine from '../providers/codex/index.js';
@@ -102,6 +104,27 @@ class EngineRegistry {
    */
   getAllMetadata(): EngineMetadata[] {
     return this.getAll().map(engine => engine.metadata);
+  }
+
+  /**
+   * Get capabilities for a specific engine.
+   * Returns DEFAULT_CAPABILITIES if the engine is not found or has no
+   * capability declaration (backwards-compatible).
+   */
+  getCapabilities(id: string): EngineCapabilities {
+    return this.engines.get(id)?.metadata.capabilities ?? DEFAULT_CAPABILITIES;
+  }
+
+  /**
+   * Return all engine modules that support a given capability.
+   * Useful for filtering engines before selection.
+   */
+  getEnginesWithCapability<K extends keyof EngineCapabilities>(
+    capability: K,
+  ): EngineModule[] {
+    return this.getAll().filter(
+      engine => engine.metadata.capabilities?.[capability] === true,
+    );
   }
 
   /**

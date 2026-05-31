@@ -3,7 +3,7 @@
  */
 
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
-import type { ImportRegistry, InstalledImport, ImportManifest, ResolvedSource, VersionStrategy, SourceConsistencyCheck } from './types.js';
+import type { ImportRegistry, InstalledImport, ImportManifest } from './types.js';
 import { getRegistryPath, ensureImportsDir, getImportInstallPath } from './paths.js';
 import { getResolvedPaths } from './manifest.js';
 
@@ -51,96 +51,23 @@ export function saveRegistry(registry: ImportRegistry): void {
 }
 
 /**
- * Metadata for registering an import
- */
-export interface RegisterImportMetadata {
-  /** Resolved source information */
-  resolvedSource: ResolvedSource;
-  /** Digest/hash representing the source content state */
-  sourceDigest?: string;
-  /** Digest type to help interpret sourceDigest */
-  digestType?: 'git-commit' | 'content-hash';
-  /** Pinned reference (commit/tag/branch) */
-  pinnedRef?: string;
-  /** Version strategy for future updates */
-  versionStrategy?: VersionStrategy;
-}
-
-/**
- * Check if a new source is consistent with an existing import
- * Returns check result with message explaining the inconsistency if any
- */
-export function checkSourceConsistency(
-  existingImport: InstalledImport,
-  newSource: string,
-  newSourceUrl: string
-): SourceConsistencyCheck {
-  // Check if source URLs match (normalized)
-  const normalizeUrl = (url: string) => url.toLowerCase().replace(/\.git$/, '').replace(/\/$/, '');
-  const existingNormalized = normalizeUrl(existingImport.sourceUrl);
-  const newNormalized = normalizeUrl(newSourceUrl);
-
-  if (existingNormalized === newNormalized) {
-    return {
-      isConsistent: true,
-      existingSource: existingImport.source,
-      newSource,
-      message: 'Sources match',
-    };
-  }
-
-  return {
-    isConsistent: false,
-    existingSource: existingImport.source,
-    newSource,
-    message: `Source mismatch: existing import '${existingImport.name}' was installed from '${existingImport.source}', but new source is '${newSource}'. Use --force to rebind to the new source.`,
-  };
-}
-
-/**
- * Find an existing import by source (for consistency checks)
- */
-export function findImportBySource(sourceUrl: string): InstalledImport | undefined {
-  const registry = loadRegistry();
-  const normalizeUrl = (url: string) => url.toLowerCase().replace(/\.git$/, '').replace(/\/$/, '');
-  const normalized = normalizeUrl(sourceUrl);
-
-  return Object.values(registry.imports).find(
-    (imp) => normalizeUrl(imp.sourceUrl) === normalized
-  );
-}
-
-/**
  * Register an installed import
  */
 export function registerImport(
   repoName: string,
   manifest: ImportManifest,
-  source: string,
-  metadata: RegisterImportMetadata
+  source: string
 ): InstalledImport {
   const registry = loadRegistry();
   const installPath = getImportInstallPath(repoName);
   const resolvedPaths = getResolvedPaths(installPath, manifest);
-  const now = new Date().toISOString();
-
-  const existingImport = registry.imports[manifest.name];
 
   const installedImport: InstalledImport = {
     name: manifest.name,
     version: manifest.version,
     source,
-    sourceUrl: metadata.resolvedSource.url,
-    sourceType: metadata.resolvedSource.type,
-    owner: metadata.resolvedSource.owner,
-    repoName,
-    sourceDigest: metadata.sourceDigest,
-    digestType: metadata.digestType,
-    pinnedRef: metadata.pinnedRef ?? existingImport?.pinnedRef,
     path: installPath,
-    installedAt: existingImport?.installedAt ?? now,
-    updatedAt: existingImport ? now : undefined,
-    versionStrategy: metadata.versionStrategy ?? existingImport?.versionStrategy,
+    installedAt: new Date().toISOString(),
     resolvedPaths,
   };
 
@@ -148,32 +75,6 @@ export function registerImport(
   saveRegistry(registry);
 
   return installedImport;
-}
-
-/**
- * Update version strategy for an existing import
- */
-export function updateImportVersionStrategy(
-  name: string,
-  versionStrategy: VersionStrategy,
-  pinnedRef?: string
-): InstalledImport | null {
-  const registry = loadRegistry();
-  const imp = registry.imports[name];
-
-  if (!imp) {
-    return null;
-  }
-
-  imp.versionStrategy = versionStrategy;
-  if (versionStrategy === 'pin' && pinnedRef) {
-    imp.pinnedRef = pinnedRef;
-  } else if (versionStrategy !== 'pin') {
-    delete imp.pinnedRef;
-  }
-
-  saveRegistry(registry);
-  return imp;
 }
 
 /**

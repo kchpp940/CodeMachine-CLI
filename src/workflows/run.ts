@@ -23,6 +23,8 @@ import {
 } from '../shared/workflows/index.js';
 import { StepIndexManager } from './indexing/index.js';
 import { registry } from '../infra/engines/index.js';
+import { capabilityErrorMessage, DEFAULT_CAPABILITIES } from '../infra/engines/core/types.js';
+import type { EngineCapabilities } from '../infra/engines/core/types.js';
 import { MonitoringCleanup, AgentMonitorService, StatusService } from '../agents/monitoring/index.js';
 import { WorkflowEventBus, WorkflowEventEmitter } from './events/index.js';
 import { ensureWorkspaceStructure, mirrorSubAgents } from '../runtime/services/workspace/index.js';
@@ -285,9 +287,21 @@ export async function runWorkflow(options: RunWorkflowOptions = {}): Promise<voi
       // Use actualStartIndex to account for controller agent being skipped
       const isCompleted = moduleIndex < actualStartIndex;
 
-      // Resolve model from step or engine default
+      // Resolve model for timeline display.
+      // Preview does NOT throw — it preserves the original config so the UI
+      // stays consistent with what will actually be shown at execution time.
+      // Instead we emit capability warnings; the execution path will throw
+      // the same messages via assertEngineCapabilities if they remain unresolved.
       const engineModule = registry.get(engineType);
+      const engineCapabilities: EngineCapabilities = engineModule?.metadata.capabilities ?? DEFAULT_CAPABILITIES;
       const resolvedModel = step.model ?? engineModule?.metadata.defaultModel;
+
+      if (step.model && !engineCapabilities.model) {
+        emitter.logMessage(uniqueAgentId, `⚠ ${capabilityErrorMessage(engineModule?.metadata.name ?? engineType, 'model')}`);
+      }
+      if (step.modelReasoningEffort && !engineCapabilities.reasoningEffort) {
+        emitter.logMessage(uniqueAgentId, `⚠ ${capabilityErrorMessage(engineModule?.metadata.name ?? engineType, 'reasoningEffort')}`);
+      }
 
       debug('[Workflow] Module %d (step %d): agentId=%s, isCompleted=%s (moduleIndex %d < actualStartIndex %d = %s)',
         moduleIndex, stepIndex, step.agentId, isCompleted, moduleIndex, actualStartIndex, moduleIndex < actualStartIndex);
