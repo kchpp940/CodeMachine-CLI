@@ -15,7 +15,7 @@ import { mcp } from './mcp/index.js';
 export * from './auth.js';
 export * from './config.js';
 export * from './execution/index.js';
-export { mcp, claudeAdapter } from './mcp/index.js';
+export * from './mcp/index.js';
 export { metadata };
 
 // Export as EngineModule for auto-discovery

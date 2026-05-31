@@ -1,85 +1,48 @@
 /**
- * Path resolution for the CodeMachine import system
+ * Base path resolution — INTERNAL USE ONLY.
+ *
+ * @internal
+ *
+ * External code MUST NOT import from this file directly.
+ * Use the public API in `./index.js` instead.
+ *
+ * Home directory resolution lives here. Install-specific paths
+ * (install, temp, backup) are computed by `services/path.service.ts`.
+ *
+ * This file re-exports path service functions for backward compatibility
+ * with internal code that has not yet been updated.
  */
 
-import { existsSync, mkdirSync, readdirSync, statSync } from 'node:fs';
+import { existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 
-/**
- * Get the base directory for CodeMachine user data
- * Default: ~/.codemachine/
- */
+export {
+  getInstallPath as getImportInstallPath,
+  isInstalled as isImportInstalled,
+  listInstalledDirectories as getInstalledImportPaths,
+} from './services/path.service.js';
+
 export function getCodemachineHomeDir(): string {
   const override = process.env.CODEMACHINE_HOME;
   if (override && override.length > 0) return override;
   return join(homedir(), '.codemachine');
 }
 
-/**
- * Get the imports directory
- * Default: ~/.codemachine/imports/
- */
 export function getImportsDir(): string {
   const override = process.env.CODEMACHINE_IMPORTS_DIR;
   if (override && override.length > 0) return override;
   return join(getCodemachineHomeDir(), 'imports');
 }
 
-/**
- * Get the registry file path
- * Default: ~/.codemachine/imports/registry.json
- */
 export function getRegistryPath(): string {
   return join(getImportsDir(), 'registry.json');
 }
 
-/**
- * Ensure the imports directory exists
- */
 export function ensureImportsDir(): string {
   const importsDir = getImportsDir();
   if (!existsSync(importsDir)) {
     mkdirSync(importsDir, { recursive: true });
   }
   return importsDir;
-}
-
-/**
- * Get the path where an import would be installed
- */
-export function getImportInstallPath(repoName: string): string {
-  return join(getImportsDir(), repoName);
-}
-
-/**
- * Check if an import is installed by repo name
- */
-export function isImportInstalled(repoName: string): boolean {
-  const installPath = getImportInstallPath(repoName);
-  return existsSync(installPath);
-}
-
-/**
- * Get all installed import directories
- */
-export function getInstalledImportPaths(): string[] {
-  const importsDir = getImportsDir();
-  if (!existsSync(importsDir)) {
-    return [];
-  }
-
-  const entries = readdirSync(importsDir);
-
-  return entries
-    .filter((entry) => {
-      if (entry === 'registry.json') return false;
-      const fullPath = join(importsDir, entry);
-      try {
-        return statSync(fullPath).isDirectory();
-      } catch {
-        return false;
-      }
-    })
-    .map((entry) => join(importsDir, entry));
 }

@@ -1,8 +1,9 @@
 /**
- * CodeMachine Import System
+ * CodeMachine Import System — Public API
  *
- * Provides functionality for importing external workflow packages
- * from GitHub and other git repositories.
+ * Only high-level capabilities are exported here.
+ * Internal services (registry/path/temp/backup/resolved-paths)
+ * are NOT directly exposed — use the installer or path resolver functions instead.
  */
 
 // Types
@@ -15,45 +16,32 @@ export type {
   ValidationResult,
 } from './types.js';
 
-// Path utilities
+// Install / uninstall / update — the primary public API
 export {
-  getCodemachineHomeDir,
-  getImportsDir,
-  getRegistryPath,
-  ensureImportsDir,
-  getImportInstallPath,
-  isImportInstalled,
-  getInstalledImportPaths,
-} from './paths.js';
+  installPackage,
+  updatePackage,
+  uninstallPackage,
+  getImportsDirectory,
+  getImportsOverview,
+  exportImportsBundle,
+  openImportsDirectory,
+} from './installer.js';
+export type {
+  InstallResult,
+  UninstallResult,
+  ImportsOverview,
+  ExportBundleResult,
+  OpenDirectoryResult,
+} from './installer.js';
 
-// Manifest parsing
+// List installed packages — for CLI listing and discovery
 export {
-  parseManifest,
-  findManifestPath,
-  getResolvedPaths,
-  validateImport,
-  getManifestFilename,
-} from './manifest.js';
-
-// Registry management
-export {
-  loadRegistry,
-  saveRegistry,
-  registerImport,
-  unregisterImport,
-  getInstalledImport,
   getAllInstalledImports,
-  isImportRegistered,
+  getInstalledImport,
   getImportRoots,
 } from './registry.js';
 
-// Source resolution
-export {
-  resolveSource,
-  extractRepoName,
-} from './resolver.js';
-
-// Import-aware path resolution
+// Import-aware path resolution — for discovering resources across packages
 export {
   resolvePromptPath,
   resolvePromptFolder,
@@ -65,14 +53,8 @@ export {
 
 // Default packages
 export { DEFAULT_PACKAGES } from './defaults.js';
-
-// Auto-import / auto-update
 export {
   ensureDefaultPackagesSync,
   ensureDefaultPackages,
   checkDefaultPackageUpdates,
 } from './auto-import.js';
-
-// Shared installer
-export { installPackage, updatePackage } from './installer.js';
-export type { InstallResult } from './installer.js';

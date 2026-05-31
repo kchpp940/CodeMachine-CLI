@@ -1,7 +1,14 @@
 import { runOpenCode } from './runner.js';
-import { createRunPrompt, createRunAgent, type ExecutorRunOptions } from '../../_shared/index.js';
+import { renderToChalk } from '../../../../../shared/formatters/outputMarkers.js';
 
-export type RunAgentOptions = ExecutorRunOptions;
+export interface RunAgentOptions {
+  abortSignal?: AbortSignal;
+  logger?: (chunk: string) => void;
+  stderrLogger?: (chunk: string) => void;
+  timeout?: number;
+  model?: string;
+  agent?: string;
+}
 
 export async function runOpenCodePrompt(options: {
   agentId: string;
@@ -10,7 +17,26 @@ export async function runOpenCodePrompt(options: {
   model?: string;
   agent?: string;
 }): Promise<void> {
-  await createRunPrompt(runOpenCode, options, 'opencode');
+  await runOpenCode({
+    prompt: options.prompt,
+    workingDir: options.cwd,
+    model: options.model,
+    agent: options.agent,
+    onData: (chunk) => {
+      try {
+        process.stdout.write(renderToChalk(chunk));
+      } catch {
+        // Ignore stdout write errors
+      }
+    },
+    onErrorData: (chunk) => {
+      try {
+        process.stderr.write(chunk);
+      } catch {
+        // Ignore stderr write errors
+      }
+    },
+  });
 }
 
 export async function runAgent(
@@ -19,5 +45,40 @@ export async function runAgent(
   cwd: string,
   options: RunAgentOptions = {},
 ): Promise<string> {
-  return createRunAgent(runOpenCode, agentId, prompt, cwd, options, 'opencode');
+  const logStdout: (chunk: string) => void = options.logger
+    ?? ((chunk: string) => {
+      try {
+        process.stdout.write(renderToChalk(chunk));
+      } catch {
+        // Ignore stdout write errors
+      }
+    });
+  const logStderr: (chunk: string) => void = options.stderrLogger
+    ?? ((chunk: string) => {
+      try {
+        process.stderr.write(chunk);
+      } catch {
+        // Ignore stderr write errors
+      }
+    });
+
+  let buffered = '';
+  const result = await runOpenCode({
+    prompt,
+    workingDir: cwd,
+    model: options.model,
+    agent: options.agent,
+    abortSignal: options.abortSignal,
+    timeout: options.timeout,
+    onData: (chunk) => {
+      buffered += chunk;
+      logStdout(chunk);
+    },
+    onErrorData: (chunk) => {
+      logStderr(chunk);
+    },
+  });
+
+  const stdout = buffered || result.stdout || '';
+  return stdout;
 }

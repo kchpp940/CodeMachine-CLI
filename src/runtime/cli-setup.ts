@@ -68,7 +68,7 @@ const { getCliTracer, withSpan, withSpanSync, withRootSpan, startManualSpanAsync
 const cliTracer = getCliTracer();
 
 // PRE-BOOT PHASE - parent span for all pre-boot operations
-import { ensureDefaultPackagesSync, ensureDefaultPackages } from '../shared/imports/auto-import.js';
+import { ensureDefaultPackagesSync, ensureDefaultPackages } from '../shared/imports/index.js';
 
 const { defaultPkgsTime, cliDepsEndTime, bootHistogram, splashShown, Command, realpathSync, existsSync, fileURLToPath } = await withSpan(
   cliTracer,

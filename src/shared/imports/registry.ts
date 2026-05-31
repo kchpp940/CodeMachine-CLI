@@ -1,66 +1,42 @@
 /**
- * Registry management for installed CodeMachine imports
+ * Registry management — INTERNAL USE ONLY.
+ *
+ * @internal
+ *
+ * External code MUST NOT import from this file directly.
+ * Use the public API in `./index.js` instead.
+ *
+ * All registry CRUD operations are encapsulated in the registry service.
+ * This file re-exports registry service functions for backward compatibility
+ * with internal code that has not yet been updated.
  */
 
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
-import type { ImportRegistry, InstalledImport, ImportManifest } from './types.js';
-import { getRegistryPath, ensureImportsDir, getImportInstallPath } from './paths.js';
-import { getResolvedPaths } from './manifest.js';
+export {
+  loadRegistry,
+  saveRegistry,
+  getByName as getInstalledImport,
+  getAll as getAllInstalledImports,
+  exists as isImportRegistered,
+  getRootPaths as getImportRoots,
+} from './services/registry.service.js';
 
-const CURRENT_SCHEMA_VERSION = 1;
+import type { ImportManifest } from './types.js';
+import type { InstalledImport } from './types.js';
+import {
+  loadRegistry,
+  saveRegistry,
+  add as addToRegistry,
+} from './services/registry.service.js';
+import { getInstallPath } from './services/path.service.js';
+import { resolve as resolvePaths } from './services/resolved-paths.service.js';
 
-/**
- * Load the import registry
- */
-export function loadRegistry(): ImportRegistry {
-  const registryPath = getRegistryPath();
-
-  if (!existsSync(registryPath)) {
-    return {
-      schemaVersion: CURRENT_SCHEMA_VERSION,
-      imports: {},
-    };
-  }
-
-  try {
-    const content = readFileSync(registryPath, 'utf8');
-    const parsed = JSON.parse(content) as ImportRegistry;
-
-    // Handle schema migrations if needed
-    if (parsed.schemaVersion !== CURRENT_SCHEMA_VERSION) {
-      // Future: migrate schema here
-    }
-
-    return parsed;
-  } catch {
-    // Corrupted registry, start fresh
-    return {
-      schemaVersion: CURRENT_SCHEMA_VERSION,
-      imports: {},
-    };
-  }
-}
-
-/**
- * Save the import registry
- */
-export function saveRegistry(registry: ImportRegistry): void {
-  ensureImportsDir();
-  const registryPath = getRegistryPath();
-  writeFileSync(registryPath, JSON.stringify(registry, null, 2));
-}
-
-/**
- * Register an installed import
- */
 export function registerImport(
   repoName: string,
   manifest: ImportManifest,
-  source: string
+  source: string,
 ): InstalledImport {
-  const registry = loadRegistry();
-  const installPath = getImportInstallPath(repoName);
-  const resolvedPaths = getResolvedPaths(installPath, manifest);
+  const installPath = getInstallPath(repoName);
+  const resolvedPaths = resolvePaths(installPath, manifest);
 
   const installedImport: InstalledImport = {
     name: manifest.name,
@@ -71,15 +47,10 @@ export function registerImport(
     resolvedPaths,
   };
 
-  registry.imports[manifest.name] = installedImport;
-  saveRegistry(registry);
-
+  addToRegistry(installedImport);
   return installedImport;
 }
 
-/**
- * Unregister an import
- */
 export function unregisterImport(name: string): boolean {
   const registry = loadRegistry();
 
@@ -90,36 +61,4 @@ export function unregisterImport(name: string): boolean {
   delete registry.imports[name];
   saveRegistry(registry);
   return true;
-}
-
-/**
- * Get an installed import by name
- */
-export function getInstalledImport(name: string): InstalledImport | undefined {
-  const registry = loadRegistry();
-  return registry.imports[name];
-}
-
-/**
- * Get all installed imports
- */
-export function getAllInstalledImports(): InstalledImport[] {
-  const registry = loadRegistry();
-  return Object.values(registry.imports);
-}
-
-/**
- * Check if an import is registered by name
- */
-export function isImportRegistered(name: string): boolean {
-  const registry = loadRegistry();
-  return name in registry.imports;
-}
-
-/**
- * Get all registered import root paths (for agent/workflow discovery)
- */
-export function getImportRoots(): string[] {
-  const imports = getAllInstalledImports();
-  return imports.map((imp) => imp.path);
 }

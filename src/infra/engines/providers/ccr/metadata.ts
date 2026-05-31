@@ -1,4 +1,13 @@
 import type { EngineMetadata } from '../../core/base.js';
-import { getProviderMetadata } from '../_shared/index.js';
 
-export const metadata: EngineMetadata = getProviderMetadata('ccr');
+export const metadata: EngineMetadata = {
+  id: 'ccr',
+  name: 'Claude Code Router',
+  description: 'Authenticate with Claude Code Router',
+  cliCommand: 'ccr',
+  cliBinary: 'ccr',
+  installCommand: 'npm install -g @musistudio/claude-code-router',
+  defaultModel: 'sonnet',
+  order: 7,
+  experimental: false,
+};

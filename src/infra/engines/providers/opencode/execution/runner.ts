@@ -3,50 +3,69 @@ import * as path from 'node:path';
 import { spawnProcess } from '../../../../process/spawn.js';
 import { buildOpenCodeRunCommand } from './commands.js';
 import { metadata } from '../metadata.js';
+import { resolveOpenCodeHome } from '../auth.js';
 import { ENV } from '../config.js';
 import { formatCommand, formatResult, formatStatus, formatMessage } from '../../../../../shared/formatters/outputMarkers.js';
 import { logger } from '../../../../../shared/logging/index.js';
 import { createTelemetryCapture } from '../../../../../shared/telemetry/index.js';
 import type { ParsedTelemetry } from '../../../core/types.js';
-import {
-  type ProviderRunOptions,
-  type ProviderRunResult,
-  validateAndNormalizeOptions,
-  getProviderCapabilities,
-  createStreamProcessingState,
-  createStdoutHandler,
-  createStderrHandler,
-  flushBuffer,
-  isCommandNotFoundError,
-  createCommandNotFoundError,
-  createExitCodeError,
-  resolveHomeDir,
-  mergeEnv,
-  shouldApplyDefault,
-  truncateText,
-} from '../../_shared/index.js';
 
-export type RunOpenCodeOptions = ProviderRunOptions & {
+export interface RunOpenCodeOptions {
+  prompt: string;
+  workingDir: string;
+  resumeSessionId?: string;
+  resumePrompt?: string;
+  model?: string;
   agent?: string;
-};
-
-export type RunOpenCodeResult = ProviderRunResult;
-
-function resolveRunnerEnv(env?: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
-  const opencodeHome = resolveHomeDir(ENV.OPENCODE_HOME, 'opencode', env);
-
-  return mergeEnv(env, {
-    XDG_CONFIG_HOME: shouldApplyDefault('XDG_CONFIG_HOME', env) ? path.join(opencodeHome, 'config') : undefined,
-    XDG_CACHE_HOME: shouldApplyDefault('XDG_CACHE_HOME', env) ? path.join(opencodeHome, 'cache') : undefined,
-    XDG_DATA_HOME: shouldApplyDefault('XDG_DATA_HOME', env) ? path.join(opencodeHome, 'data') : undefined,
-  });
+  env?: NodeJS.ProcessEnv;
+  onData?: (chunk: string) => void;
+  onErrorData?: (chunk: string) => void;
+  onTelemetry?: (telemetry: ParsedTelemetry) => void;
+  onSessionId?: (sessionId: string) => void;
+  abortSignal?: AbortSignal;
+  timeout?: number; // Timeout in milliseconds (default: 1800000ms = 30 minutes)
 }
 
+export interface RunOpenCodeResult {
+  stdout: string;
+  stderr: string;
+}
+
+function shouldApplyDefault(key: string, overrides?: NodeJS.ProcessEnv): boolean {
+  return overrides?.[key] === undefined && process.env[key] === undefined;
+}
+
+function resolveRunnerEnv(env?: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const runnerEnv: NodeJS.ProcessEnv = { ...process.env, ...(env ?? {}) };
+
+  // Set all three XDG environment variables to subdirectories under OPENCODE_HOME
+  // This centralizes all OpenCode data under ~/.codemachine/opencode by default
+  const opencodeHome = resolveOpenCodeHome(runnerEnv[ENV.OPENCODE_HOME]);
+
+  if (shouldApplyDefault('XDG_CONFIG_HOME', env)) {
+    runnerEnv.XDG_CONFIG_HOME = path.join(opencodeHome, 'config');
+  }
+
+  if (shouldApplyDefault('XDG_CACHE_HOME', env)) {
+    runnerEnv.XDG_CACHE_HOME = path.join(opencodeHome, 'cache');
+  }
+
+  if (shouldApplyDefault('XDG_DATA_HOME', env)) {
+    runnerEnv.XDG_DATA_HOME = path.join(opencodeHome, 'data');
+  }
+
+  return runnerEnv;
+}
+
+const truncate = (value: string, length = 100): string =>
+  value.length > length ? `${value.slice(0, length)}...` : value;
+
 function formatToolUse(part: unknown): string {
-  const partObj = (typeof part === 'object' && part !== null ? part : {}) as Record<string, unknown>;
-  const tool = (partObj?.tool as string) ?? 'tool';
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const partObj = (typeof part === 'object' && part !== null ? part : {}) as Record<string, any>;
+  const tool = partObj?.tool ?? 'tool';
   const base = formatCommand(tool, 'success');
-  const state = (partObj?.state as Record<string, unknown>) ?? {};
+  const state = partObj?.state ?? {};
 
   if (tool === 'bash') {
     const outputRaw =
@@ -69,80 +88,118 @@ function formatToolUse(part: unknown): string {
 
   if (previewSource) {
     const preview = previewSource.trim();
-    return `${base}\n${formatResult(truncateText(preview), false)}`;
+    return `${base}\n${formatResult(truncate(preview), false)}`;
   }
 
   return base;
 }
 
 function formatStepEvent(type: string, part: unknown): string | null {
-  const partObj = (typeof part === 'object' && part !== null ? part : {}) as Record<string, unknown>;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const partObj = (typeof part === 'object' && part !== null ? part : {}) as Record<string, any>;
   const reason = typeof partObj?.reason === 'string' ? partObj.reason : undefined;
 
+  // Only show final step (reason: 'stop'), skip intermediate steps (reason: 'tool-calls')
   if (reason !== 'stop') {
     return null;
   }
 
-  const tokens = partObj?.tokens as Record<string, unknown> | undefined;
+  const tokens = partObj?.tokens;
   if (!tokens) {
     return null;
   }
 
-  const tokenCache = tokens.cache as Record<string, unknown> | undefined;
-  const cache = ((tokenCache?.read as number) ?? 0) + ((tokenCache?.write as number) ?? 0);
-  const totalIn = ((tokens.input as number) ?? 0) + cache;
-  const tokenSummary = `⏱️  Tokens: ${totalIn}in/${(tokens.output as number) ?? 0}out${cache > 0 ? ` (${cache} cached)` : ''}`;
+  const cache = (tokens.cache?.read ?? 0) + (tokens.cache?.write ?? 0);
+  const totalIn = (tokens.input ?? 0) + cache;
+  const tokenSummary = `⏱️  Tokens: ${totalIn}in/${tokens.output ?? 0}out${cache > 0 ? ` (${cache} cached)` : ''}`;
 
   return tokenSummary;
 }
 
 function formatErrorEvent(error: unknown): string {
-  const errorObj = (typeof error === 'object' && error !== null ? error : {}) as Record<string, unknown>;
-  const data = errorObj.data as Record<string, unknown> | undefined;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const errorObj = (typeof error === 'object' && error !== null ? error : {}) as Record<string, any>;
   const dataMessage =
-    typeof data?.message === 'string'
-      ? data.message
+    typeof errorObj?.data?.message === 'string'
+      ? errorObj.data.message
       : typeof errorObj?.message === 'string'
-        ? errorObj.message as string
+        ? errorObj.message
         : typeof errorObj?.name === 'string'
-          ? errorObj.name as string
+          ? errorObj.name
           : 'OpenCode reported an unknown error';
 
   return `${formatCommand('OpenCode Error', 'error')}\n${formatResult(dataMessage, true)}`;
 }
 
 export async function runOpenCode(options: RunOpenCodeOptions): Promise<RunOpenCodeResult> {
-  const caps = getProviderCapabilities('opencode');
-  const sharedOpts = validateAndNormalizeOptions(options, caps, 'OpenCode');
+  const {
+    prompt,
+    workingDir,
+    resumeSessionId,
+    resumePrompt,
+    model,
+    agent,
+    env,
+    onData,
+    onErrorData,
+    onTelemetry,
+    onSessionId,
+    abortSignal,
+    timeout = 1800000,
+  } = options;
 
-  const { prompt, resumeSessionId, resumePrompt, agent, env, onData, onErrorData, onTelemetry, onSessionId, abortSignal, timeout = 1800000 } = options;
+  if (!prompt) {
+    throw new Error('runOpenCode requires a prompt.');
+  }
+
+  if (!workingDir) {
+    throw new Error('runOpenCode requires a working directory.');
+  }
 
   const runnerEnv = resolveRunnerEnv(env);
-  const { command, args } = buildOpenCodeRunCommand({ ...sharedOpts, agent });
+  const { command, args } = buildOpenCodeRunCommand({ model, agent, resumeSessionId });
 
   const runnerStartTime = Date.now();
   logger.debug(
     `OpenCode runner - prompt length: ${prompt.length}, lines: ${prompt.split('\n').length}, agent: ${
       agent ?? 'build'
-    }, model: ${sharedOpts.model ?? 'default'}`,
+    }, model: ${model ?? 'default'}`,
   );
 
-  const telemetryCapture = createTelemetryCapture('opencode', sharedOpts.model, prompt, sharedOpts.workingDir);
-  const state = createStreamProcessingState();
+  const telemetryCapture = createTelemetryCapture('opencode', model, prompt, workingDir);
+  let jsonBuffer = '';
+  let stderrBuffer = '';
+  let capturedError: string | null = null;
   let isFirstStep = true;
+  let sessionIdCaptured = false;
+  let firstJsonLineReceived = false;
 
-  const handleStreamLine = (line: string, json: Record<string, unknown> | null): void => {
-    if (!line.trim() || !json) return;
+  const processLine = (line: string): void => {
+    if (!line.trim()) {
+      return;
+    }
 
-    if (!state.firstJsonLineReceived) {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(line);
+    } catch {
+      return;
+    }
+
+    // Log timing for first valid JSON line
+    if (!firstJsonLineReceived) {
+      firstJsonLineReceived = true;
       logger.debug(`[RUNNER-TIMING] First JSON line received ${Date.now() - runnerStartTime}ms after runner start`);
     }
 
+    // Capture telemetry - returns true only when NEW telemetry was parsed
     const prevCaptured = telemetryCapture.getCaptured();
     telemetryCapture.captureFromStreamJson(line);
     const newCaptured = telemetryCapture.getCaptured();
 
+    // Only emit when NEW telemetry is captured (not on every line)
     if (onTelemetry && newCaptured?.tokens && newCaptured !== prevCaptured) {
+      // Context window = input + cached (cache.read + cache.write)
       const totalContextIn = (newCaptured.tokens.input ?? 0) + (newCaptured.tokens.cached ?? 0);
       const telemetryPayload = {
         tokensIn: totalContextIn,
@@ -156,13 +213,19 @@ export async function runOpenCode(options: RunOpenCodeOptions): Promise<RunOpenC
       onTelemetry(telemetryPayload);
     }
 
-    if (!state.sessionIdCaptured && json.sessionID && onSessionId) {
-      state.sessionIdCaptured = true;
-      logger.debug(`[SESSION_ID CAPTURED] ${json.sessionID} (${Date.now() - runnerStartTime}ms after runner start)`);
-      onSessionId(json.sessionID as string);
+    // Type guard for parsed JSON
+    if (typeof parsed !== 'object' || parsed === null) {
+      return;
     }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const parsedObj = parsed as Record<string, any>;
 
-    const parsedObj = json as Record<string, unknown>;
+    // Capture session ID from first event that contains it
+    if (!sessionIdCaptured && parsedObj.sessionID && onSessionId) {
+      sessionIdCaptured = true;
+      logger.debug(`[SESSION_ID CAPTURED] ${parsedObj.sessionID} (${Date.now() - runnerStartTime}ms after runner start)`);
+      onSessionId(parsedObj.sessionID);
+    }
 
     let formatted: string | null = null;
     switch (parsedObj.type) {
@@ -174,22 +237,27 @@ export async function runOpenCode(options: RunOpenCodeOptions): Promise<RunOpenC
           isFirstStep = false;
           formatted = formatStatus('OpenCode is analyzing your request...');
         }
+        // Subsequent step_start events are silent
         break;
       case 'step_finish':
-        formatted = formatStepEvent(parsedObj.type as string, parsedObj.part);
+        formatted = formatStepEvent(parsedObj.type, parsedObj.part);
         break;
       case 'text': {
-        const textPart = parsedObj.part as Record<string, unknown>;
+        const textPart = parsedObj.part;
         const rawText = typeof textPart?.text === 'string' ? textPart.text : '';
+        // Strip leading newlines - OpenCode adds these for terminal formatting
+        // which we handle ourselves via formatMessage
         const textValue = rawText.replace(/^\n+/, '');
+        // Only format if text has non-whitespace content
         formatted = textValue.trim() ? formatMessage(textValue) : null;
         break;
       }
       case 'error':
         formatted = formatErrorEvent(parsedObj.error);
-        if (!state.capturedError && parsedObj.error) {
+        // Capture error for later (OpenCode may exit 0 even on errors)
+        if (!capturedError && parsedObj.error) {
           const errorObj = parsedObj.error as Record<string, unknown>;
-          state.capturedError = (errorObj.data as Record<string, unknown>)?.message as string
+          capturedError = (errorObj.data as Record<string, unknown>)?.message as string
             ?? errorObj.message as string
             ?? errorObj.name as string
             ?? 'Unknown error';
@@ -205,13 +273,20 @@ export async function runOpenCode(options: RunOpenCodeOptions): Promise<RunOpenC
     }
   };
 
-  const onStdout = createStdoutHandler(state, {
-    onSessionId,
-    sessionIdField: 'sessionID',
-    processLine: handleStreamLine,
-  });
+  const normalizeChunk = (chunk: string): string => {
+    let result = chunk;
 
-  const onStderr = createStderrHandler(state, onErrorData);
+    // Convert line endings to \n
+    result = result.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+
+    // Handle carriage returns that cause line overwrites
+    result = result.replace(/^.*\r([^\r\n]*)/gm, '$1');
+
+    // Collapse excessive newlines
+    result = result.replace(/\n{3,}/g, '\n\n');
+
+    return result;
+  };
 
   let result;
   try {
@@ -219,34 +294,79 @@ export async function runOpenCode(options: RunOpenCodeOptions): Promise<RunOpenC
     result = await spawnProcess({
       command,
       args,
-      cwd: sharedOpts.workingDir,
+      cwd: workingDir,
       env: runnerEnv,
       stdinInput: resumeSessionId ? resumePrompt : prompt,
       stdioMode: 'pipe',
-      onStdout,
-      onStderr,
+      onStdout: (chunk) => {
+        const normalized = normalizeChunk(chunk);
+        jsonBuffer += normalized;
+
+        const lines = jsonBuffer.split('\n');
+        jsonBuffer = lines.pop() ?? '';
+
+        for (const line of lines) {
+          processLine(line);
+        }
+      },
+      onStderr: (chunk) => {
+        const normalized = normalizeChunk(chunk);
+        stderrBuffer += normalized;
+        onErrorData?.(normalized);
+      },
       signal: abortSignal,
       timeout,
     });
     logger.debug(`[RUNNER-TIMING] spawnProcess completed at ${Date.now() - runnerStartTime}ms`);
   } catch (error) {
-    if (isCommandNotFoundError(error)) {
+    const err = error as { code?: string; message?: string };
+    const message = err?.message ?? '';
+    const notFound =
+      err?.code === 'ENOENT' ||
+      /not recognized as an internal or external command/i.test(message) ||
+      /command not found/i.test(message);
+
+    if (notFound) {
+      const installMessage = [
+        `'${command}' is not available on this system.`,
+        'Install OpenCode via:',
+        '  npm i -g opencode-ai@latest',
+        '  brew install opencode',
+        '  scoop bucket add extras && scoop install extras/opencode',
+        '  choco install opencode',
+        'Docs: https://opencode.ai/docs',
+      ].join('\n');
       logger.error(`${metadata.name} CLI not found when executing: ${command} ${args.join(' ')}`);
-      throw createCommandNotFoundError(command, metadata, args);
+      throw new Error(installMessage);
     }
+
     throw error;
   }
 
-  flushBuffer(state, handleStreamLine, { onSessionId, sessionIdField: 'sessionID' });
+  if (jsonBuffer.trim()) {
+    processLine(jsonBuffer);
+    jsonBuffer = '';
+  }
 
-  const stderr = state.stderrBuffer.trim() || result.stderr.trim();
+  const stderr = stderrBuffer.trim() || result.stderr.trim();
   const stdout = result.stdout.trim();
 
+  // OpenCode may exit with code 0 even on errors (e.g., invalid model)
+  // Detect: 1) JSON error event captured, 2) no stdout but has stderr = startup failure
   const isStartupError = !stdout && stderr;
 
-  if (result.exitCode !== 0 || state.capturedError || isStartupError) {
-    telemetryCapture.logCapturedTelemetry(result.exitCode);
-    throw createExitCodeError(result.exitCode, stderr, stdout, 'OpenCode', state.capturedError);
+  if (result.exitCode !== 0 || capturedError || isStartupError) {
+    const sample = (stderr || stdout || 'no error output').split('\n').slice(0, 10).join('\n');
+
+    logger.error('OpenCode CLI execution failed', {
+      exitCode: result.exitCode,
+      sample,
+      command: `${command} ${args.join(' ')}`,
+    });
+
+    // Use captured JSON error, fall back to stderr
+    const errorMessage = capturedError || stderr || `exited with code ${result.exitCode}`;
+    throw new Error(errorMessage);
   }
 
   telemetryCapture.logCapturedTelemetry(result.exitCode);

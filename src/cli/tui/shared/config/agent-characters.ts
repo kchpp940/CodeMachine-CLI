@@ -11,7 +11,7 @@
 import * as path from "node:path"
 import { existsSync, readFileSync } from "node:fs"
 import { getDevRoot } from "../../../../shared/runtime/dev.js"
-import { getAllInstalledImports } from "../../../../shared/imports/registry.js"
+import { getAllInstalledImports } from "../../../../shared/imports/index.js"
 import { debug } from "../../../../shared/logging/logger.js"
 import type { ActivityType, AgentCharactersConfig, Persona } from "./agent-characters.types.js"
 

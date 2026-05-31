@@ -4,6 +4,8 @@ import importPlugin from 'eslint-plugin-import';
 import tseslint from 'typescript-eslint';
 
 const typescriptFiles = ['src/**/*.{ts,tsx}', 'tests/**/*.{ts,tsx}'];
+const cliTuiFiles = ['src/cli/**/*.{ts,tsx}'];
+const runtimeFiles = ['src/runtime/**/*.{ts,tsx}'];
 
 export default tseslint.config(
   {
@@ -46,6 +48,102 @@ export default tseslint.config(
         'error',
         {
           ignore: ['^bun:'],
+        },
+      ],
+    },
+  },
+  {
+    files: cliTuiFiles,
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: ['**/shared/imports/paths.js', '**/shared/imports/paths'],
+              message: 'Use shared/imports/index.js instead - paths.js is @internal',
+            },
+            {
+              group: ['**/shared/imports/registry.js', '**/shared/imports/registry'],
+              message: 'Use shared/imports/index.js instead - registry.js is @internal',
+            },
+            {
+              group: ['**/shared/imports/manifest.js', '**/shared/imports/manifest'],
+              message: 'Use shared/imports/index.js instead - manifest.js is @internal',
+            },
+            {
+              group: ['**/shared/imports/resolver.js', '**/shared/imports/resolver'],
+              message: 'Use shared/imports/index.js instead - resolver.js is @internal',
+            },
+            {
+              group: ['**/shared/imports/installer.js', '**/shared/imports/installer'],
+              message: 'Use shared/imports/index.js instead - installer.js is @internal',
+            },
+            {
+              group: ['**/shared/imports/auto-import.js', '**/shared/imports/auto-import'],
+              message: 'Use shared/imports/index.js instead - auto-import.js is @internal',
+            },
+            {
+              group: ['**/shared/imports/resolve.js', '**/shared/imports/resolve'],
+              message: 'Use shared/imports/index.js instead - resolve.js is @internal',
+            },
+            {
+              group: ['**/shared/imports/defaults.js', '**/shared/imports/defaults'],
+              message: 'Use shared/imports/index.js instead - defaults.js is @internal',
+            },
+            {
+              group: ['**/shared/imports/services/**'],
+              message: 'Use shared/imports/index.js instead - services are @internal',
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
+    files: runtimeFiles,
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: ['**/shared/imports/paths.js', '**/shared/imports/paths'],
+              message: 'Use shared/imports/index.js instead - paths.js is @internal',
+            },
+            {
+              group: ['**/shared/imports/registry.js', '**/shared/imports/registry'],
+              message: 'Use shared/imports/index.js instead - registry.js is @internal',
+            },
+            {
+              group: ['**/shared/imports/manifest.js', '**/shared/imports/manifest'],
+              message: 'Use shared/imports/index.js instead - manifest.js is @internal',
+            },
+            {
+              group: ['**/shared/imports/resolver.js', '**/shared/imports/resolver'],
+              message: 'Use shared/imports/index.js instead - resolver.js is @internal',
+            },
+            {
+              group: ['**/shared/imports/installer.js', '**/shared/imports/installer'],
+              message: 'Use shared/imports/index.js instead - installer.js is @internal',
+            },
+            {
+              group: ['**/shared/imports/auto-import.js', '**/shared/imports/auto-import'],
+              message: 'Use shared/imports/index.js instead - auto-import.js is @internal',
+            },
+            {
+              group: ['**/shared/imports/resolve.js', '**/shared/imports/resolve'],
+              message: 'Use shared/imports/index.js instead - resolve.js is @internal',
+            },
+            {
+              group: ['**/shared/imports/defaults.js', '**/shared/imports/defaults'],
+              message: 'Use shared/imports/index.js instead - defaults.js is @internal',
+            },
+            {
+              group: ['**/shared/imports/services/**'],
+              message: 'Use shared/imports/index.js instead - services are @internal',
+            },
+          ],
         },
       ],
     },

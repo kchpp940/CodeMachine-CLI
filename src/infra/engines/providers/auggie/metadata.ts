@@ -1,4 +1,12 @@
 import type { EngineMetadata } from '../../core/base.js';
-import { getProviderMetadata } from '../_shared/index.js';
 
-export const metadata: EngineMetadata = getProviderMetadata('auggie');
+export const metadata: EngineMetadata = {
+  id: 'auggie',
+  name: 'Auggie CLI',
+  description: 'Authenticate with Auggie CLI (Augment Code)',
+  cliCommand: 'auggie',
+  cliBinary: 'auggie',
+  installCommand: 'npm install -g @augmentcode/auggie',
+  order: 6,
+};
+

@@ -1,35 +1,38 @@
-import {
-  type SharedCommandOptions,
-  type ProviderCommand,
-  normalizeModel,
-  normalizeResumeSessionId,
-  getProviderCapabilities,
-} from '../../_shared/index.js';
-
-export type OpenCodeCommandOptions = SharedCommandOptions & {
+export interface OpenCodeCommandOptions {
+  /**
+   * Provider/model identifier (e.g., anthropic/claude-3.7-sonnet)
+   */
+  model?: string;
+  /**
+   * Agent name to run (defaults to 'build')
+   */
   agent?: string;
-};
+  /**
+   * Session ID to resume (uses -s flag)
+   */
+  resumeSessionId?: string;
+}
 
-export type OpenCodeCommand = ProviderCommand;
+export interface OpenCodeCommand {
+  command: string;
+  args: string[];
+}
 
-const caps = getProviderCapabilities('opencode');
-
-export function buildOpenCodeRunCommand(options: OpenCodeCommandOptions): OpenCodeCommand {
-  const { resumeSessionId, model, agent } = options;
-
+export function buildOpenCodeRunCommand(options: OpenCodeCommandOptions = {}): OpenCodeCommand {
   const args: string[] = ['run', '--format', 'json'];
 
-  const normalizedResumeId = normalizeResumeSessionId(resumeSessionId);
-  if (normalizedResumeId) {
-    args.push(caps.resumeFlag, normalizedResumeId);
+  // Add session resume flag if provided
+  if (options.resumeSessionId?.trim()) {
+    args.push('--session', options.resumeSessionId.trim());
   }
 
-  const agentName = agent?.trim() || 'build';
-  args.push('--agent', agentName);
+  const agentName = options.agent?.trim() || 'build';
+  if (agentName) {
+    args.push('--agent', agentName);
+  }
 
-  const normalizedModel = normalizeModel(model);
-  if (normalizedModel) {
-    args.push(caps.modelFlag, normalizedModel);
+  if (options.model?.trim()) {
+    args.push('--model', options.model.trim());
   }
 
   return {

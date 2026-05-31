@@ -344,16 +344,23 @@ export function useHomeCommands(options: UseHomeCommandsOptions) {
   }
 
   const handleExportCommand = () => {
-    const { getImportsDir, ensureImportsDir } = require("../../../../../shared/imports/index.js")
+    const { openImportsDirectory } = require("../../../../../shared/imports/index.js")
 
-    ensureImportsDir()
-    const importsDir = getImportsDir()
+    const result = openImportsDirectory()
 
-    toast.show({
-      variant: "info",
-      message: `Imports can be accessed manually from: ${importsDir}`,
-      duration: 10000,
-    })
+    if (result.success) {
+      toast.show({
+        variant: "success",
+        message: `Opened imports directory (${result.packageCount} package(s))`,
+        duration: 5000,
+      })
+    } else {
+      toast.show({
+        variant: "error",
+        message: `Failed to open imports: ${result.error}`,
+        duration: 8000,
+      })
+    }
   }
 
   const handleExitCommand = () => {
