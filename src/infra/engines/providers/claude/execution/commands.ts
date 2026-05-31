@@ -1,11 +1,7 @@
-import { metadata } from '../metadata.js';
-import type { EngineOverrideContext } from '../../../core/types.js';
-
 export interface ClaudeCommandOptions {
   workingDir: string;
   resumeSessionId?: string;
   model?: string;
-  override?: EngineOverrideContext;
 }
 
 export interface ClaudeCommand {
@@ -13,39 +9,43 @@ export interface ClaudeCommand {
   args: string[];
 }
 
+/**
+ * Model mapping from config models to Claude model names
+ * If model is not in this map, it will be passed as-is to Claude
+ */
 const MODEL_MAP: Record<string, string> = {
-  'gpt-5-codex': 'sonnet',
+  'gpt-5-codex': 'sonnet', // Map to Claude Sonnet
   'gpt-4': 'sonnet',
   'gpt-3.5-turbo': 'haiku',
 };
 
+/**
+ * Maps a model name from config to Claude's model naming convention
+ * Returns undefined if the model should use Claude's default
+ */
 function mapModel(model?: string): string | undefined {
   if (!model) {
     return undefined;
   }
 
+  // If it's in our mapping, use the mapped value
   if (model in MODEL_MAP) {
     return MODEL_MAP[model];
   }
 
+  // If it's already a Claude model name, pass it through
   if (model.startsWith('claude-') || model === 'sonnet' || model === 'opus' || model === 'haiku') {
     return model;
   }
 
+  // Otherwise, don't use a model flag and let Claude use its default
   return undefined;
 }
 
 export function buildClaudeExecCommand(options: ClaudeCommandOptions): ClaudeCommand {
-  const { resumeSessionId, model, override } = options;
+  const { resumeSessionId, model } = options;
 
-  if (override && override.engineId !== metadata.id) {
-    throw new Error(
-      `Engine override mismatch: buildClaudeExecCommand called for engine '${metadata.id}' ` +
-      `but override specifies engine '${override.engineId}'. ` +
-      `This is an internal error - the wrong engine command builder was called.`
-    );
-  }
-
+  // Base args: --print for non-interactive mode, bypass permissions, streaming output
   const args: string[] = [
     '--print',
     '--output-format',
@@ -56,18 +56,20 @@ export function buildClaudeExecCommand(options: ClaudeCommandOptions): ClaudeCom
     'bypassPermissions',
   ];
 
+  // Add resume flag if resuming a session
   if (resumeSessionId?.trim()) {
     args.push('--resume', resumeSessionId.trim());
   }
 
-  const finalModel = override?.model ?? model;
-  const mappedModel = mapModel(finalModel);
+  // Add model if specified and valid
+  const mappedModel = mapModel(model);
   if (mappedModel) {
     args.push('--model', mappedModel);
   }
 
+  // Prompt is passed via stdin
   return {
-    command: metadata.cliBinary,
+    command: 'claude',
     args,
   };
 }

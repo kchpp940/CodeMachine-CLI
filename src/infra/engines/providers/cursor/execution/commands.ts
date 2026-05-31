@@ -1,12 +1,8 @@
-import { metadata } from '../metadata.js';
-import type { EngineOverrideContext } from '../../../core/types.js';
-
 export interface CursorCommandOptions {
   workingDir: string;
   resumeSessionId?: string;
   model?: string;
   cursorConfigDir?: string;
-  override?: EngineOverrideContext;
 }
 
 export interface CursorCommand {
@@ -14,6 +10,10 @@ export interface CursorCommand {
   args: string[];
 }
 
+/**
+ * Model mapping from config models to Cursor model names
+ * If model is not in this map, it will be passed as-is to Cursor
+ */
 const MODEL_MAP: Record<string, string> = {
   'gpt-5-codex': 'gpt-5-codex',
   'gpt-4': 'gpt-5',
@@ -24,34 +24,34 @@ const MODEL_MAP: Record<string, string> = {
   'grok': 'grok',
 };
 
+/**
+ * Maps a model name from config to Cursor's model naming convention
+ * Returns undefined if the model should use Cursor's default (auto)
+ */
 function mapModel(model?: string): string | undefined {
   if (!model) {
     return undefined;
   }
 
+  // If it's in our mapping, use the mapped value
   if (model in MODEL_MAP) {
     return MODEL_MAP[model];
   }
 
+  // If it's already a Cursor model name, pass it through
   const validModels = ['auto', 'cheetah', 'sonnet-4.5', 'sonnet-4.5-thinking', 'gpt-5', 'gpt-5-codex', 'opus-4.1', 'grok'];
   if (validModels.includes(model)) {
     return model;
   }
 
+  // Otherwise, don't use a model flag and let Cursor use its default (auto)
   return undefined;
 }
 
 export function buildCursorExecCommand(options: CursorCommandOptions): CursorCommand {
-  const { resumeSessionId, model, cursorConfigDir, override } = options;
+  const { resumeSessionId, model, cursorConfigDir } = options;
 
-  if (override && override.engineId !== metadata.id) {
-    throw new Error(
-      `Engine override mismatch: buildCursorExecCommand called for engine '${metadata.id}' ` +
-      `but override specifies engine '${override.engineId}'. ` +
-      `This is an internal error - the wrong engine command builder was called.`
-    );
-  }
-
+  // Base args: -p for print mode, --force, streaming JSON output
   const args: string[] = [
     '-p',
     '--force',
@@ -59,22 +59,25 @@ export function buildCursorExecCommand(options: CursorCommandOptions): CursorCom
     'stream-json',
   ];
 
+  // Add resume flag if resuming a session
   if (resumeSessionId?.trim()) {
     args.push(`--resume=${resumeSessionId.trim()}`);
   }
 
-  const finalModel = override?.model ?? model;
-  const mappedModel = mapModel(finalModel);
+  // Add model if specified and valid
+  const mappedModel = mapModel(model);
   if (mappedModel) {
     args.push('--model', mappedModel);
   }
 
+  // Add custom config directory if specified
   if (cursorConfigDir) {
     args.push(cursorConfigDir);
   }
 
+  // Prompt is passed via stdin
   return {
-    command: metadata.cliBinary,
+    command: 'cursor-agent',
     args,
   };
 }
