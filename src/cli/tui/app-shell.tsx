@@ -232,10 +232,17 @@ export function App(props: { initialToast?: InitialToast }) {
     const specPath = path.join(cwd, '.codemachine', 'inputs', 'specifications.md')
     otel_debug(LOGGER_NAMES.TUI, '[AppShell] specPath=%s', [specPath])
 
+    // Read resume confirmation flag from environment (set by CLI argument parser)
+    const resumeConfirmedEnv = process.env.CODEMACHINE_RESUME_CONFIRMED
+    const resumeConfirmed = resumeConfirmedEnv === 'true'
+
     pendingWorkflowStart = () => {
       otel_debug(LOGGER_NAMES.TUI, '[AppShell] Importing and running workflow', [])
       import("../../workflows/run.js").then(({ runWorkflow }) => {
-        runWorkflow({ cwd }).catch((error) => {
+        runWorkflow({
+          cwd,
+          resumeConfirmed,
+        }).catch((error) => {
           // Error is already handled by workflow:error event (shows ErrorModal)
           // Just log it here for debugging - no need to show toast
           const errorMsg = error instanceof Error ? error.message : String(error)

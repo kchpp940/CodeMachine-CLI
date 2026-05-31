@@ -47,5 +47,6 @@ export function createInitialState(workflowName: string, totalSteps = 0): Workfl
     agentLogs: new Map(),
     autonomousMode: "pending",
     controllerState: null,
+    recoveryPlan: null,
   }
 }

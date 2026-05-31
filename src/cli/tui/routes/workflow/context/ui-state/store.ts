@@ -13,6 +13,7 @@ import { createSubAgentActions } from "./actions/subagent-actions"
 import { createNavigationActions } from "./actions/navigation-actions"
 import { createWorkflowActions } from "./actions/workflow-actions"
 import { createHistoryActions } from "./actions/history-actions"
+import { createRecoveryActions } from "./actions/recovery-actions"
 import { debug } from "../../../../../../shared/logging/logger.js"
 
 const THROTTLE_MS = 16
@@ -96,6 +97,12 @@ function createStoreInternal(workflowName: string): UIActions & { reset: (workfl
     notify,
   })
 
+  const recoveryActions = createRecoveryActions({
+    getState,
+    setState,
+    notify,
+  })
+
   return {
     getState,
     subscribe,
@@ -105,6 +112,7 @@ function createStoreInternal(workflowName: string): UIActions & { reset: (workfl
     ...navigationActions,
     ...workflowActions,
     ...historyActions,
+    ...recoveryActions,
   }
 }
 

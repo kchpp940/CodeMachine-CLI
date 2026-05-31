@@ -231,6 +231,42 @@ export class StepIndexManager {
     await writeTrackingData(trackingPath, data);
   }
 
+  /**
+   * Marks a step as failed and cannot be resumed
+   */
+  async stepFailed(stepIndex: number, error?: string): Promise<void> {
+    logLifecycle(StepLifecyclePhase.FAILED, stepIndex, { error });
+
+    const { data, trackingPath } = await readTrackingData(this.cmRoot);
+    const completedSteps = data.completedSteps ?? {};
+    const key = String(stepIndex);
+
+    // Get or create step data
+    if (!completedSteps[key]) {
+      completedSteps[key] = {
+        sessionId: '',
+        monitoringId: 0,
+      };
+    }
+
+    // Mark as failed
+    completedSteps[key].failedAt = new Date().toISOString();
+    if (error) {
+      completedSteps[key].error = error;
+    }
+    // Remove completedChains - no longer needed
+    delete completedSteps[key].completedChains;
+
+    data.completedSteps = completedSteps;
+
+    // Remove from notCompletedSteps
+    if (data.notCompletedSteps) {
+      data.notCompletedSteps = data.notCompletedSteps.filter((idx) => idx !== stepIndex);
+    }
+
+    await writeTrackingData(trackingPath, data);
+  }
+
   // ============================================
   // Query Methods
   // ============================================
@@ -414,47 +450,6 @@ export class StepIndexManager {
       existing.monitoringId = monitoringId;
       await writeTrackingData(trackingPath, data);
     }
-  }
-
-  /**
-   * Sync full resumable state for a step in a single write.
-   *
-   * Call this on interruption cleanup for paused (resumable) agents to ensure
-   * sessionId, monitoringId, and completedChains are all atomically persisted
-   * before DB/UI status is updated. This prevents recovery from re-executing
-   * already-completed chained prompts.
-   */
-  async syncStepResumableState(
-    stepIndex: number,
-    state: {
-      sessionId: string;
-      monitoringId: number;
-      completedChains?: number[];
-    }
-  ): Promise<void> {
-    logDebug('sync', `Syncing step ${stepIndex} resumable state`, state);
-
-    const { data, trackingPath } = await readTrackingData(this.cmRoot);
-    const completedSteps = data.completedSteps ?? {};
-    const key = String(stepIndex);
-
-    const existing = completedSteps[key];
-    if (existing) {
-      existing.sessionId = state.sessionId;
-      existing.monitoringId = state.monitoringId;
-      if (state.completedChains !== undefined) {
-        existing.completedChains = state.completedChains;
-      }
-    } else {
-      completedSteps[key] = {
-        sessionId: state.sessionId,
-        monitoringId: state.monitoringId,
-        completedChains: state.completedChains,
-      };
-    }
-
-    data.completedSteps = completedSteps;
-    await writeTrackingData(trackingPath, data);
   }
 
   /**

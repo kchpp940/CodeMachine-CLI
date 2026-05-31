@@ -9,3 +9,4 @@ export { createSubAgentActions, type SubAgentActionsContext } from "./subagent-a
 export { createNavigationActions, type NavigationActionsContext } from "./navigation-actions"
 export { createWorkflowActions, type WorkflowActionsContext } from "./workflow-actions"
 export { createHistoryActions, type HistoryActionsContext } from "./history-actions"
+export { createRecoveryActions, type RecoveryActionsContext } from "./recovery-actions"

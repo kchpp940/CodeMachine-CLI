@@ -18,6 +18,7 @@ import type { WorkflowMode } from '../mode/index.js';
 import type { StepSession } from '../session/index.js';
 import type { StepIndexManager } from '../indexing/index.js';
 import type { StatusService } from '../../agents/monitoring/index.js';
+import type { RecoveryPlan } from '../recovery/types.js';
 
 /**
  * Runner options (public API)
@@ -30,6 +31,8 @@ export interface WorkflowRunnerOptions {
   startIndex?: number;
   indexManager: StepIndexManager;
   status: StatusService;
+  /** Confirmed recovery plan - the single source of truth for resume execution */
+  recoveryPlan?: RecoveryPlan;
 }
 
 /**
@@ -47,6 +50,8 @@ export interface RunnerContext {
   readonly mode: WorkflowMode;
   readonly indexManager: StepIndexManager;
   readonly status: StatusService;
+  /** Confirmed recovery plan - the single source of truth for resume decisions */
+  readonly recoveryPlan?: RecoveryPlan;
 
   // Mutable state via getters/setters
   getAbortController(): AbortController | null;

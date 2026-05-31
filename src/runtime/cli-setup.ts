@@ -376,6 +376,8 @@ export async function runCodemachineCli(argv: string[] = process.argv): Promise<
         .version(VERSION)
         .description('Codemachine multi-agent CLI orchestrator')
         .option('-d, --dir <path>', 'Target workspace directory', process.cwd())
+        .option('-y, --yes', 'Auto-confirm workflow recovery without interactive prompt')
+        .option('--resume-confirmed', 'Auto-confirm workflow recovery without interactive prompt (alias for --yes)')
         // TODO: Move spec path handling to template level
         // .option('--spec <path>', 'Path to the planning specification file', DEFAULT_SPEC_PATH)
         .action(async (options) => {
@@ -383,14 +385,11 @@ export async function runCodemachineCli(argv: string[] = process.argv): Promise<
           process.env.CODEMACHINE_CWD = cwd;
           otel_info(LOGGER_NAMES.CLI, 'Workspace directory: %s', [cwd]);
 
-          // TODO: Move spec path handling to template level
-          // if (options.spec && options.spec !== DEFAULT_SPEC_PATH) {
-          //   const specPath = path.resolve(cwd, options.spec);
-          //   process.env.CODEMACHINE_SPEC_PATH = specPath;
-          //   otel_info(LOGGER_NAMES.CLI, 'Using custom spec path: %s', [specPath]);
-          // } else {
-          //   otel_info(LOGGER_NAMES.CLI, 'Using default spec path: %s', [DEFAULT_SPEC_PATH]);
-          // }
+          // Pass resume confirmation flag to workflow via environment
+          if (options.yes || options.resumeConfirmed) {
+            process.env.CODEMACHINE_RESUME_CONFIRMED = 'true';
+            otel_info(LOGGER_NAMES.CLI, 'Resume confirmation enabled via CLI flag');
+          }
 
           // Start lazy loading (fire-and-forget)
           initializeLazy(cwd).catch(err => {

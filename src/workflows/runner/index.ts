@@ -34,6 +34,7 @@ import type { StatusService } from '../../agents/monitoring/index.js';
 import type { WorkflowRunnerOptions, RunnerContext } from './types.js';
 import { runStepFresh } from '../step/run.js';
 import { handleWaiting, handleDelegated } from './core.js';
+import type { RecoveryPlan } from '../recovery/types.js';
 
 export type { WorkflowRunnerOptions, RunnerContext } from './types.js';
 export { handleWaiting, handleDelegated } from './core.js';
@@ -56,6 +57,7 @@ export class WorkflowRunner implements RunnerContext {
   readonly mode: WorkflowMode;
   readonly indexManager: StepIndexManager;
   readonly status: StatusService;
+  readonly recoveryPlan?: RecoveryPlan;
 
   private userInput: UserInputProvider;
   private controllerInput: ControllerInputProvider;
@@ -71,6 +73,7 @@ export class WorkflowRunner implements RunnerContext {
     this.template = options.template;
     this.indexManager = options.indexManager;
     this.status = options.status;
+    this.recoveryPlan = options.recoveryPlan;
 
     // Filter to only module steps
     this.moduleSteps = options.template.steps.filter(
@@ -249,7 +252,8 @@ export class WorkflowRunner implements RunnerContext {
         // Log skip debug info for loops
         logSkipDebug(step, stepIndex, this.activeLoop);
 
-        // Check if step should be skipped (executeOnce, loop skip list)
+        // Check if step should be skipped - recovery plan is the single source of truth
+        // for resume decisions (completed/failed steps are skipped per the plan)
         const skipResult = await shouldSkipStep({
           step,
           index: stepIndex,
@@ -257,6 +261,7 @@ export class WorkflowRunner implements RunnerContext {
           indexManager: this.indexManager,
           uniqueAgentId,
           emitter: this.emitter,
+          recoveryPlan: this.recoveryPlan,
         });
 
         if (skipResult.skip) {

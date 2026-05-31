@@ -14,7 +14,6 @@ import { loadAgentConfig } from '../../agents/runner/index.js';
 import { loadChainedPrompts } from '../../agents/runner/chained.js';
 import { getSelectedConditions, getSelectedTrack } from '../../shared/workflows/template.js';
 import { StatusService, AgentMonitorService } from '../../agents/monitoring/index.js';
-import { IllegalTransitionError } from '../../agents/monitoring/status.js';
 import type { CrashRestoreContext, CrashRestoreResult } from './types.js';
 
 /**
@@ -64,25 +63,8 @@ export async function restoreFromCrash(ctx: CrashRestoreContext): Promise<CrashR
     }
   }
 
-  // 2. Ensure DB is paused (resumable) and UI shows awaiting
-  //    The DB must reflect 'paused' so that subsequent crashes still find a resumable state.
-  //    The UI shows 'awaiting' because that is the ephemeral state the user interacts with.
+  // 2. Update agent status to awaiting
   const status = StatusService.getInstance();
-  if (stepData.monitoringId !== undefined) {
-    status.register(stepData.monitoringId, uniqueAgentId);
-    const dbStatus = status.getDbStatus(stepData.monitoringId);
-    if (!dbStatus || dbStatus === 'running') {
-      try {
-        await status.pause(stepData.monitoringId);
-      } catch (e) {
-        if (e instanceof IllegalTransitionError) {
-          debug('[recovery/restore] Agent %d already in terminal state %s, skipping pause', stepData.monitoringId, e.from);
-        } else {
-          throw e;
-        }
-      }
-    }
-  }
   status.awaiting(uniqueAgentId);
 
   // 3. Set machine context

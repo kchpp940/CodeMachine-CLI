@@ -17,19 +17,31 @@ import { StatusService } from '../../agents/monitoring/index.js';
 
 import { detectCrashRecovery } from './detect.js';
 import { restoreFromCrash } from './restore.js';
+import { generateRecoveryPlan, formatRecoveryPlan } from './plan.js';
 import type {
   CrashDetectionResult,
   CrashRestoreContext,
   CrashRestoreResult,
+  RecoveryPlan,
+  RecoveryStepInfo,
+  RecoveryChainStatus,
+  StepRecoveryStatus,
+  GenerateRecoveryPlanOptions,
 } from './types.js';
 
 // Re-exports
 export { detectCrashRecovery, isCrashRecovery } from './detect.js';
 export { restoreFromCrash } from './restore.js';
+export { generateRecoveryPlan, formatRecoveryPlan } from './plan.js';
 export type {
   CrashDetectionResult,
   CrashRestoreContext,
   CrashRestoreResult,
+  RecoveryPlan,
+  RecoveryStepInfo,
+  RecoveryChainStatus,
+  StepRecoveryStatus,
+  GenerateRecoveryPlanOptions,
 } from './types.js';
 
 /**
@@ -115,18 +127,9 @@ export async function handleCrashRecovery(
   } = options;
 
   // 1. Detect if crash recovery is needed
-  const detection = await detectCrashRecovery(stepData);
+  const detection = detectCrashRecovery(stepData);
 
   if (!detection.isRecovering) {
-    if (detection.reason === 'db_failed') {
-      debug('[recovery] Step %d is not recoverable (DB shows failed), cleaning up index', stepIndex);
-      await indexManager.removeFromNotCompleted(stepIndex);
-      const status = StatusService.getInstance();
-      status.failed(uniqueAgentId);
-      machine.send({ type: 'STEP_ERROR', error: new Error(`Step ${stepIndex} failed (not recoverable)`) });
-      return { handled: true, detection };
-    }
-
     debug('[recovery] No crash recovery needed for step %d', stepIndex);
     return { handled: false, detection };
   }

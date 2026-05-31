@@ -29,36 +29,6 @@ export class AgentMonitorService {
   }
 
   /**
-   * Reconcile stale 'running' agents **scoped to the current workflow**.
-   *
-   * Accepts an explicit list of monitoringIds so we never touch agents
-   * belonging to other sessions. For each stale agent:
-   *  - has sessionId → paused  (resumable)
-   *  - no  sessionId → failed  (non-resumable)
-   *
-   * Returns the number of agents that were reconciled.
-   */
-  async reconcileStaleRunning(monitoringIds: number[]): Promise<number> {
-    if (monitoringIds.length === 0) return 0;
-
-    let reconciled = 0;
-    for (const id of monitoringIds) {
-      const agent = this.repository.get(id);
-      if (!agent || agent.status !== 'running') continue;
-
-      logger.debug(`[MonitorService] Reconciling stale agent %d (scoped)`, id);
-      if (agent.sessionId) {
-        await this.markPaused(agent.id);
-      } else {
-        await this.fail(agent.id, 'Process crashed; agent was running without sessionId');
-      }
-      reconciled += 1;
-    }
-
-    return reconciled;
-  }
-
-  /**
    * Register a new agent and return its ID
    */
   async register(input: RegisterAgentInput, logPath?: string): Promise<number> {

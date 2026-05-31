@@ -136,6 +136,45 @@ export interface ControllerState {
 
 export type WorkflowView = 'controller' | 'executing'
 
+export type StepRecoveryStatus = 'completed' | 'resumable' | 'failed' | 'not_started' | 'excluded'
+
+export interface RecoveryChainStatus {
+  index: number
+  name: string
+  label: string
+  completed: boolean
+  isNext: boolean
+}
+
+export interface RecoveryStepInfo {
+  stepIndex: number
+  templateIndex: number
+  agentId: string
+  agentName: string
+  status: StepRecoveryStatus
+  sessionId?: string
+  monitoringId?: number
+  agentStatus?: AgentStatus
+  chains?: RecoveryChainStatus[]
+  nextChainIndex?: number
+  totalChains?: number
+  error?: string
+}
+
+export interface RecoveryPlanState {
+  needsRecovery: boolean
+  startIndex: number
+  totalSteps: number
+  completedSteps: number
+  resumableSteps: number
+  failedSteps: number
+  notStartedSteps: number
+  steps: RecoveryStepInfo[]
+  summary: string
+  requiresConfirmation: boolean
+  confirmed: boolean
+}
+
 export interface WorkflowState {
   workflowName: string
   version: string
@@ -167,6 +206,7 @@ export interface WorkflowState {
   agentLogs: Map<string, string[]>
   autonomousMode: AutonomousMode
   controllerState: ControllerState | null
+  recoveryPlan: RecoveryPlanState | null
 }
 
 export type ThemeLike = {
